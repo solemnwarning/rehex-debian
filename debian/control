@@ -2,6 +2,7 @@ Source: rehex
 Priority: extra
 Maintainer: Daniel Collins <solemnwarning@solemnwarning.net>
 Build-Depends:
+ libcapstone-dev,
  debhelper (>= 9),
  libjansson-dev,
  libwxgtk3.0-dev,
@@ -19,6 +20,7 @@ Architecture: any
 Depends:
  ${shlibs:Depends},
  ${misc:Depends},
+ libcapstone3,
  libjansson4,
  libwxgtk3.0-0v5,
  llvm-7-runtime,
