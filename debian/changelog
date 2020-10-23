@@ -1,4 +1,4 @@
-rehex (0.2.0-0~ubuntu2004) focal; urgency=low
+rehex (0.2.0-0~ubuntu2010) UNRELEASED; urgency=low
 
   * Allow copying comments from a document and pasting them elsewhere in the
     same document or into another one.
