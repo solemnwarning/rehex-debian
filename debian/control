@@ -6,7 +6,6 @@ Build-Depends:
  debhelper (>= 9),
  libjansson-dev,
  libwxgtk3.0-dev,
- llvm-dev,
  xauth,
  xvfb,
  wx3.0-headers,
