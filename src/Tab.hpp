@@ -21,6 +21,7 @@
 #include <map>
 #include <set>
 #include <string>
+#include <vector>
 #include <wx/dialog.h>
 #include <wx/notebook.h>
 #include <wx/panel.h>
@@ -73,6 +74,9 @@ namespace REHex
 			InlineCommentMode get_inline_comment_mode() const;
 			void set_inline_comment_mode(InlineCommentMode inline_comment_mode);
 			
+			/* Public for use by unit tests. */
+			static std::vector<DocumentCtrl::Region*> compute_regions(SharedDocumentPointer doc, InlineCommentMode inline_comment_mode);
+			
 		private:
 			InlineCommentMode inline_comment_mode;
 			
@@ -106,6 +110,7 @@ namespace REHex
 			void OnDocumentCtrlCursorUpdate(CursorUpdateEvent &event);
 			void OnDocumentCommentModified(wxCommandEvent &event);
 			void OnDocumenHighlightsChanged(wxCommandEvent &event);
+			void OnDocumentDataTypesChanged(wxCommandEvent &event);
 			
 			template<typename T> void OnEventToForward(T &event)
 			{
@@ -121,6 +126,7 @@ namespace REHex
 			void vtools_adjust_now_idle(wxIdleEvent &event);
 			void htools_adjust_on_idle();
 			void htools_adjust_now_idle(wxIdleEvent &event);
+			void xtools_fix_visibility(wxNotebook *notebook);
 			
 			void repopulate_regions();
 			

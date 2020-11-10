@@ -15,11 +15,13 @@
  * Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 */
 
+#include "platform.hpp"
 #include <string.h>
 #include <vector>
 
 #include "disassemble.hpp"
 #include "Events.hpp"
+#include <capstone/capstone.h>
 
 static REHex::ToolPanel *Disassemble_factory(wxWindow *parent, REHex::SharedDocumentPointer &document, REHex::DocumentCtrl *document_ctrl)
 {
@@ -32,57 +34,99 @@ BEGIN_EVENT_TABLE(REHex::Disassemble, wxPanel)
 	EVT_CHOICE(wxID_ANY, REHex::Disassemble::OnArch)
 END_EVENT_TABLE()
 
-struct LLVMArchitecture {
+struct CSArchitecture {
 	const char *triple;
 	const char *label;
+	cs_arch arch;
+	cs_mode mode;
 };
 
-static LLVMArchitecture arch_list[] = {
-	#ifdef LLVM_ENABLE_ARM
-	{ "arm",   "ARM" },
-	{ "armeb", "ARM (big endian)" },
+cs_mode operator|(const cs_mode& lhs, const cs_mode& rhs)
+{
+	return static_cast<cs_mode>(static_cast<int>(lhs) | static_cast<int>(rhs));
+}
+
+/* List of all known architectures */
+static const CSArchitecture known_arch_list[] = {
+	{ "arm",   "ARM",               CS_ARCH_ARM, CS_MODE_ARM | CS_MODE_LITTLE_ENDIAN },
+	{ "armeb", "ARM (big endian)",  CS_ARCH_ARM, CS_MODE_ARM | CS_MODE_BIG_ENDIAN },
+	/* Add THUMB? */
+	
+	{ "aarch64",    "AArch64 (ARM64)",              CS_ARCH_ARM64, CS_MODE_ARM | CS_MODE_LITTLE_ENDIAN },
+	{ "aarch64_be", "AArch64 (ARM64, big endian)",  CS_ARCH_ARM64, CS_MODE_ARM | CS_MODE_BIG_ENDIAN },
+	
+	#if CS_MAKE_VERSION(CS_API_MAJOR, CS_API_MINOR) >= CS_MAKE_VERSION(4, 0)
+	{ "m680x-6301",  "Hitachi 6301/6303",  CS_ARCH_M680X,  CS_MODE_M680X_6301 },
+	{ "m680x-6309",  "Hitachi 6309",       CS_ARCH_M680X,  CS_MODE_M680X_6309 },
 	#endif
 	
-	#ifdef LLVM_ENABLE_AARCH64
-	{ "aarch64",    "AArch64 (ARM64)" },
-	{ "aarch64_be", "AArch64 (ARM64, big endian)" },
+	{ "mips",     "MIPS",                           CS_ARCH_MIPS, CS_MODE_MIPS32 | CS_MODE_BIG_ENDIAN },
+	{ "mipsel",   "MIPS (little endian)",           CS_ARCH_MIPS, CS_MODE_MIPS32 | CS_MODE_LITTLE_ENDIAN },
+	{ "mips64",   "MIPS (64-bit)",                  CS_ARCH_MIPS, CS_MODE_MIPS64 | CS_MODE_BIG_ENDIAN },
+	{ "mips64el", "MIPS (64-bit, little endian)",   CS_ARCH_MIPS, CS_MODE_MIPS64 | CS_MODE_LITTLE_ENDIAN },
+	
+	#if CS_MAKE_VERSION(CS_API_MAJOR, CS_API_MINOR) >= CS_MAKE_VERSION(4, 0)
+	{ "m680x-6800",   "Motorola 6800/6802",             CS_ARCH_M680X,  CS_MODE_M680X_6800  },
+	{ "m680x-6801",   "Motorola 6801/6803",             CS_ARCH_M680X,  CS_MODE_M680X_6801  },
+	{ "m680x-6805",   "Motorola/Freescale 6805",        CS_ARCH_M680X,  CS_MODE_M680X_6805  },
+	{ "m680x-6808",   "Motorola/Freescale/NXP 68HC08",  CS_ARCH_M680X,  CS_MODE_M680X_6808  },
+	{ "m680x-6809",   "Motorola 6809",                  CS_ARCH_M680X,  CS_MODE_M680X_6809  },
+	{ "m680x-6811",   "Motorola/Freescale/NXP 68HC11",  CS_ARCH_M680X,  CS_MODE_M680X_6811  },
+	{ "m680x-cpu12",  "Motorola/Freescale/NXP 68HC12",  CS_ARCH_M680X,  CS_MODE_M680X_CPU12 },
+	
+	{ "m68k-68000", "Motorola 68000", CS_ARCH_M68K, CS_MODE_M68K_000 },
+	{ "m68k-68000", "Motorola 68010", CS_ARCH_M68K, CS_MODE_M68K_010 },
+	{ "m68k-68000", "Motorola 68020", CS_ARCH_M68K, CS_MODE_M68K_020 },
+	{ "m68k-68000", "Motorola 68030", CS_ARCH_M68K, CS_MODE_M68K_030 },
+	{ "m68k-68000", "Motorola 68040", CS_ARCH_M68K, CS_MODE_M68K_040 },
+	{ "m68k-68000", "Motorola 68060", CS_ARCH_M68K, CS_MODE_M68K_060 },
 	#endif
 	
-	#ifdef LLVM_ENABLE_MIPS
-	{ "mips",     "MIPS" },
-	{ "mipsel",   "MIPS (little endian)" },
-	{ "mips64",   "MIPS (64-bit)" },
-	{ "mips64el", "MIPS (64-bit, little endian)" },
+	#if CS_MAKE_VERSION(CS_API_MAJOR, CS_API_MINOR) >= CS_MAKE_VERSION(5, 0)
+	{ "mos65xx", "MOS 65XX (including 6502)", CS_ARCH_MOS65XX, CS_MODE_LITTLE_ENDIAN },
 	#endif
 	
-	#ifdef LLVM_ENABLE_POWERPC
-	{ "powerpc",     "PowerPC" },
-	{ "powerpc64",   "PowerPC (64-bit)" },
-	{ "powerpc64le", "PowerPC (64-bit) (little endian)" },
-	#endif
+	{ "powerpc",     "PowerPC",                     CS_ARCH_PPC, CS_MODE_32 | CS_MODE_BIG_ENDIAN },
+	{ "powerpc64",   "PowerPC (64-bit)",            CS_ARCH_PPC, CS_MODE_64 | CS_MODE_BIG_ENDIAN },
+	{ "powerpc64le", "PowerPC (64-bit) (little endian)",CS_ARCH_PPC, CS_MODE_64 | CS_MODE_LITTLE_ENDIAN },
 	
-	#ifdef LLVM_ENABLE_SPARC
-	{ "sparc",   "SPARC" },
-	{ "sparcel", "SPARC (little endian)" },
-	{ "sparcv9", "SPARC V9 (SPARC64)" },
-	#endif
+	{ "sparc",   "SPARC",                   CS_ARCH_SPARC, CS_MODE_BIG_ENDIAN },
+	{ "sparcel", "SPARC (little endian)",   CS_ARCH_SPARC, CS_MODE_LITTLE_ENDIAN },
+	{ "sparcv9", "SPARC V9 (SPARC64)",      CS_ARCH_SPARC, CS_MODE_BIG_ENDIAN | CS_MODE_V9 },
 	
-	#ifdef LLVM_ENABLE_X86
-	{ "i386",   "X86" },
-	{ "x86_64", "X86-64 (AMD64)" },
-	#endif
-	
-	{ NULL, NULL },
+	{ "x86_16", "X86-16",           CS_ARCH_X86, CS_MODE_16 },
+	{ "i386",   "X86",              CS_ARCH_X86, CS_MODE_32 },
+	{ "x86_64", "X86-64 (AMD64)",   CS_ARCH_X86, CS_MODE_64 },
 };
 
+/* List of all supported architectures */
+static std::vector<CSArchitecture> arch_list;
 static const char *DEFAULT_ARCH = "x86_64";
 
+static std::once_flag g_Initialize_disassembler;
+static void Initialize_disassembler()
+{
+	for(const auto& desc : known_arch_list)
+	{
+		/* Check if this architecture is supported by the currently used capstone */
+		if(cs_support(desc.arch))
+		{
+			arch_list.push_back(desc);
+		}
+		else
+		{
+			/* FIXME: Add debug printing? */
+		}
+	}
+}
+
 REHex::Disassemble::Disassemble(wxWindow *parent, SharedDocumentPointer &document, DocumentCtrl *document_ctrl):
-	ToolPanel(parent), document(document), document_ctrl(document_ctrl), disassembler(NULL)
+	ToolPanel(parent), document(document), document_ctrl(document_ctrl), disassembler(0)
 {
 	arch = new wxChoice(this, wxID_ANY);
 	
-	for(int i = 0; arch_list[i].triple != NULL; ++i)
+	std::call_once(g_Initialize_disassembler, Initialize_disassembler);
+	for(int i = 0; i < (int)arch_list.size(); ++i)
 	{
 		arch->Append(arch_list[i].label);
 		
@@ -107,7 +151,7 @@ REHex::Disassemble::Disassemble(wxWindow *parent, SharedDocumentPointer &documen
 	this->document.auto_cleanup_bind(DATA_INSERT,    &REHex::Disassemble::OnDataModified, this);
 	this->document.auto_cleanup_bind(DATA_OVERWRITE, &REHex::Disassemble::OnDataModified, this);
 	
-	this->document_ctrl.auto_cleanup_bind(EV_BASE_CHANGED, &REHex::Disassemble::OnBaseChanged, this);
+	this->document_ctrl.auto_cleanup_bind(EV_DISP_SETTING_CHANGED, &REHex::Disassemble::OnBaseChanged, this);
 	
 	reinit_disassembler();
 	update();
@@ -115,10 +159,9 @@ REHex::Disassemble::Disassemble(wxWindow *parent, SharedDocumentPointer &documen
 
 REHex::Disassemble::~Disassemble()
 {
-	if(disassembler != NULL)
+	if(disassembler != 0)
 	{
-		LLVMDisasmDispose(disassembler);
-		disassembler = NULL;
+		cs_close(&disassembler);
 	}
 }
 
@@ -138,7 +181,7 @@ void REHex::Disassemble::load_state(wxConfig *config)
 	std::string cur_triple = arch_list[ arch->GetSelection() ].triple;
 	std::string new_triple = config->Read("arch", cur_triple).ToStdString();
 	
-	for(int i = 0; arch_list[i].triple != NULL; ++i)
+	for(int i = 0; i < (int)arch_list.size(); ++i)
 	{
 		if(new_triple == arch_list[i].triple)
 		{
@@ -159,7 +202,12 @@ wxSize REHex::Disassemble::DoGetBestClientSize() const
 
 void REHex::Disassemble::update()
 {
-	if(disassembler == NULL)
+	if (!is_visible)
+	{
+		/* There is no sense in updating this if we are not visible */
+		return;
+	}
+	if(disassembler == 0)
 	{
 		assembly->clear();
 		assembly->append_line(0, "<error>");
@@ -254,56 +302,43 @@ void REHex::Disassemble::update()
 
 void REHex::Disassemble::reinit_disassembler()
 {
-	const char *triple = arch_list[ arch->GetSelection() ].triple;
+	const CSArchitecture& desc = arch_list[ arch->GetSelection() ];
 	
-	if(disassembler != NULL)
+	if(disassembler != 0)
 	{
-		LLVMDisasmDispose(disassembler);
-		disassembler = NULL;
+		cs_close(&disassembler);
 	}
 	
-	disassembler = LLVMCreateDisasm(triple, NULL, 0, NULL, NULL);
-	if(disassembler == NULL)
+	cs_err error = cs_open(desc.arch, desc.mode, &disassembler);
+	if(error != CS_ERR_OK)
 	{
 		/* TODO: Report error */
 		return;
 	}
-	
-	/* Use Intel assembly syntax. */
-	LLVMSetDisasmOptions(disassembler, LLVMDisassembler_Option_AsmPrinterVariant);
 }
 
 std::map<off_t, REHex::Disassemble::Instruction> REHex::Disassemble::disassemble(off_t offset, const void *code, size_t size)
 {
-	/* LLVM takes a NON-CONST buffer, wheee. */
-	std::vector<unsigned char> code_copy(
-		(const unsigned char*)(code),
-		(const unsigned char*)(code) + size);
-	
 	std::map<off_t, Instruction> instructions;
+	char disasm_buf[256];
 	
-	for(size_t i = 0; i < size;)
+	const uint8_t* code_ = static_cast<const uint8_t*>(code);
+	size_t code_size = size;
+	uint64_t address = offset;
+	cs_insn* insn = cs_malloc(disassembler);
+	
+	/* NOTE: @code, @code_size & @address variables are all updated! */
+	while(cs_disasm_iter(disassembler, &code_, &code_size, &address, insn))
 	{
-		char disasm_buf[256];
-		size_t inst_size = LLVMDisasmInstruction(disassembler, code_copy.data() + i, code_copy.size() - i, 0, disasm_buf, sizeof(disasm_buf));
+		Instruction inst;
 		
-		if(inst_size > 0)
-		{
-			/* LLVM indents decoded instructions?! */
-			const char *disasm = disasm_buf + strspn(disasm_buf, "\t ");
-			
-			Instruction inst;
-			inst.length = inst_size;
-			inst.disasm = disasm;
-			
-			instructions.insert(std::make_pair((off_t)(offset + i), inst));
-			
-			i += inst_size;
-		}
-		else{
-			break;
-		}
+		snprintf(disasm_buf, sizeof(disasm_buf), "%s\t%s", insn->mnemonic, insn->op_str);
+		inst.length = insn->size;
+		inst.disasm = disasm_buf;
+		
+		instructions.insert(std::make_pair(insn->address, inst));
 	}
+	cs_free(insn, 1);
 	
 	return instructions;
 }
