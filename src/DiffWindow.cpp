@@ -15,6 +15,7 @@
  * Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 */
 
+#include "platform.hpp"
 #include <algorithm>
 #include <set>
 #include <stdio.h>
@@ -112,7 +113,7 @@ REHex::DiffWindow::~DiffWindow()
 	{
 		if(d->second != NULL)
 		{
-			d->second->Unbind(EV_BASE_CHANGED,  &REHex::DiffWindow::OnDocumentBaseChange,  this);
+			d->second->Unbind(EV_DISP_SETTING_CHANGED,  &REHex::DiffWindow::OnDocumentDisplaySettingsChange,  this);
 		}
 		
 		d->first->Unbind(DATA_OVERWRITE, &REHex::DiffWindow::OnDocumentDataOverwrite, this);
@@ -185,6 +186,7 @@ std::list<REHex::DiffWindow::Range>::iterator REHex::DiffWindow::add_range(const
 	
 	new_range->doc_ctrl->set_cursor_position(new_range->offset);
 	new_range->doc_ctrl->set_offset_display_base(new_range->main_doc_ctrl->get_offset_display_base());
+	new_range->doc_ctrl->set_bytes_per_group    (new_range->main_doc_ctrl->get_bytes_per_group());
 	
 	new_range->splitter->SplitVertically(new_range->notebook, new_range->help_panel);
 	
@@ -208,7 +210,7 @@ std::list<REHex::DiffWindow::Range>::iterator REHex::DiffWindow::add_range(const
 		new_range->doc->Bind(DATA_INSERT,    &REHex::DiffWindow::OnDocumentDataInsert,    this);
 		new_range->doc->Bind(DATA_OVERWRITE, &REHex::DiffWindow::OnDocumentDataOverwrite, this);
 		
-		new_range->main_doc_ctrl->Bind(EV_BASE_CHANGED,  &REHex::DiffWindow::OnDocumentBaseChange,  this);
+		new_range->main_doc_ctrl->Bind(EV_DISP_SETTING_CHANGED, &REHex::DiffWindow::OnDocumentDisplaySettingsChange,  this);
 	}
 	
 	resize_splitters();
@@ -216,7 +218,7 @@ std::list<REHex::DiffWindow::Range>::iterator REHex::DiffWindow::add_range(const
 	return new_range;
 }
 
-std::list<REHex::DiffWindow::Range>::iterator REHex::DiffWindow::remove_range(std::list<Range>::iterator range)
+std::list<REHex::DiffWindow::Range>::iterator REHex::DiffWindow::remove_range(std::list<Range>::iterator range, bool called_from_page_closed_handler)
 {
 	auto next = std::next(range);
 	
@@ -266,7 +268,24 @@ std::list<REHex::DiffWindow::Range>::iterator REHex::DiffWindow::remove_range(st
 	
 	SharedDocumentPointer range_doc(range->doc);
 	DocumentCtrl *range_mdc = range->main_doc_ctrl;
-	
+
+	if(!called_from_page_closed_handler)
+	{
+		/* There may still be a wxEVT_PAINT event pending on this range's DocumentCtrl,
+		 * which would result in DiffDataRegion::highlight_at_off() being called with an
+		 * invalid 'range' pointer after we erase it.
+		 *
+		 * We reinitialise the DocumentCtrl with a useless-but-valid DataRegion to work
+		 * around this case. What gets drawn doesn't matter since the control will be
+		 * destroyed when wxWidgets next runs idle events.
+		*/
+
+		std::vector<DocumentCtrl::Region*> regions;
+		regions.push_back(new DocumentCtrl::DataRegion(0, 0));
+
+		range->doc_ctrl->replace_all_regions(regions);
+	}
+
 	ranges.erase(range);
 	
 	/* If this was the last Range using this Document, remove event bindings. */
@@ -276,7 +295,7 @@ std::list<REHex::DiffWindow::Range>::iterator REHex::DiffWindow::remove_range(st
 	{
 		if(range_mdc != NULL)
 		{
-			range_mdc->Unbind(EV_BASE_CHANGED,  &REHex::DiffWindow::OnDocumentBaseChange,  this);
+			range_mdc->Unbind(EV_DISP_SETTING_CHANGED, &REHex::DiffWindow::OnDocumentDisplaySettingsChange,  this);
 		}
 		
 		range_doc->Unbind(DATA_OVERWRITE, &REHex::DiffWindow::OnDocumentDataOverwrite, this);
@@ -305,7 +324,7 @@ std::list<REHex::DiffWindow::Range>::iterator REHex::DiffWindow::remove_range(st
 
 void REHex::DiffWindow::doc_update(Range *range)
 {
-	std::list<DocumentCtrl::Region*> regions;
+	std::vector<DocumentCtrl::Region*> regions;
 	regions.push_back(new DiffDataRegion(range->offset, range->length, this, range));
 	
 	range->doc_ctrl->replace_all_regions(regions);
@@ -387,7 +406,7 @@ void REHex::DiffWindow::OnIdle(wxIdleEvent &event)
 	{
 		if((DocumentCtrl*)(i->main_doc_ctrl) == NULL)
 		{
-			i = remove_range(i);
+			i = remove_range(i, false);
 		}
 		else{
 			++i;
@@ -452,7 +471,7 @@ void REHex::DiffWindow::OnDocumentDataErase(OffsetLengthEvent &event)
 				
 				if(r->length == 0)
 				{
-					r = remove_range(r);
+					r = remove_range(r, false);
 					continue;
 				}
 				else{
@@ -468,7 +487,7 @@ void REHex::DiffWindow::OnDocumentDataErase(OffsetLengthEvent &event)
 				
 				if(r->length == 0)
 				{
-					r = remove_range(r);
+					r = remove_range(r, false);
 					continue;
 				}
 				else{
@@ -602,7 +621,7 @@ void REHex::DiffWindow::OnDocumentDataOverwrite(OffsetLengthEvent &event)
 	event.Skip();
 }
 
-void REHex::DiffWindow::OnDocumentBaseChange(wxCommandEvent &event)
+void REHex::DiffWindow::OnDocumentDisplaySettingsChange(wxCommandEvent &event)
 {
 	wxObject *src = event.GetEventObject();
 	
@@ -611,9 +630,15 @@ void REHex::DiffWindow::OnDocumentBaseChange(wxCommandEvent &event)
 		if(r->main_doc_ctrl == src)
 		{
 			r->doc_ctrl->set_offset_display_base(r->main_doc_ctrl->get_offset_display_base());
+			r->doc_ctrl->set_bytes_per_group(r->main_doc_ctrl->get_bytes_per_group());
 			r->notebook->SetPageText(0, range_title(&*r));
 		}
 	}
+	
+	/* Changing offset base or byte grouping may change how many bytes can fit on one line
+	 * without scrolling.
+	*/
+	resize_splitters();
 	
 	event.Skip();
 }
@@ -623,7 +648,7 @@ void REHex::DiffWindow::OnNotebookClosed(wxAuiNotebookEvent &event)
 	auto nb_range = std::find_if(ranges.begin(), ranges.end(), [event](const Range &range) { return range.notebook == event.GetEventObject(); });
 	assert(nb_range != ranges.end());
 	
-	remove_range(nb_range);
+	remove_range(nb_range, true);
 }
 
 void REHex::DiffWindow::OnCursorUpdate(CursorUpdateEvent &event)
@@ -721,6 +746,16 @@ void REHex::DiffWindow::OnToggleASCII(wxCommandEvent &event)
 
 REHex::DiffWindow::DiffDataRegion::DiffDataRegion(off_t d_offset, off_t d_length, DiffWindow *diff_window, Range *range):
 	DataRegion(d_offset, d_length), diff_window(diff_window), range(range) {}
+
+int REHex::DiffWindow::DiffDataRegion::calc_width(REHex::DocumentCtrl &doc)
+{
+	int width = REHex::DocumentCtrl::DataRegion::calc_width(doc);
+	
+	/* Override padding set by base class. */
+	first_line_pad_bytes = 0;
+	
+	return width;
+}
 
 REHex::DocumentCtrl::DataRegion::Highlight REHex::DiffWindow::DiffDataRegion::highlight_at_off(off_t off) const
 {
