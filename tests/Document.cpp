@@ -15,6 +15,7 @@
  * Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 */
 
+#include "../src/platform.hpp"
 #include <gtest/gtest.h>
 
 #include <string>
@@ -90,8 +91,7 @@ class DocumentTest: public ::testing::Test
 
 #define EXPECT_EVENTS(...) \
 { \
-	const char *expected_events_[] = { __VA_ARGS__ }; \
-	std::vector<std::string> expected_events(expected_events_, expected_events_ + (sizeof(expected_events_) / sizeof(*expected_events_))); \
+	const std::vector<std::string>expected_events = { __VA_ARGS__ }; \
 	EXPECT_EQ(expected_events, events); \
 }
 

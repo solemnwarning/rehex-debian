@@ -17,6 +17,7 @@
 
 #define __STDC_FORMAT_MACROS
 
+#include "platform.hpp"
 #include <assert.h>
 #include <inttypes.h>
 
@@ -241,6 +242,11 @@ wxSize REHex::DecodePanel::DoGetBestClientSize() const
 
 void REHex::DecodePanel::update()
 {
+	if (!is_visible)
+	{
+		/* There is no sense in updating this if we are not visible */
+		return;
+	}
 	assert(document != NULL);
 	
 	std::vector<unsigned char> data_at_cur;
