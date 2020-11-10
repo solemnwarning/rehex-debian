@@ -61,6 +61,7 @@ namespace REHex {
 			void OnRedo(wxCommandEvent &event);
 			void OnSelectAll(wxCommandEvent &event);
 			void OnSelectRange(wxCommandEvent &event);
+			void OnFillRange(wxCommandEvent &event);
 			void OnOverwriteMode(wxCommandEvent &event);
 			
 			void OnSetBytesPerLine(wxCommandEvent &event);
@@ -83,6 +84,7 @@ namespace REHex {
 			void OnDocumentClose(wxAuiNotebookEvent &event);
 			void OnDocumentClosed(wxAuiNotebookEvent &event);
 			void OnDocumentMenu(wxAuiNotebookEvent &event);
+			void OnDocumentMiddleMouse(wxAuiNotebookEvent& event);
 			
 			void OnCursorUpdate(CursorUpdateEvent &event);
 			void OnSelectionChange(wxCommandEvent &event);

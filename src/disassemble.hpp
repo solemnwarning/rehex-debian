@@ -18,8 +18,6 @@
 #ifndef REHEX_DISASSEMBLE_HPP
 #define REHEX_DISASSEMBLE_HPP
 
-#include <llvm-c/Disassembler.h>
-#include <llvm-c/Target.h>
 #include <map>
 #include <string>
 #include <wx/choice.h>
@@ -46,6 +44,7 @@ namespace REHex {
 			
 			virtual void save_state(wxConfig *config) const override;
 			virtual void load_state(wxConfig *config) override;
+			virtual void update() override;
 			
 			virtual wxSize DoGetBestClientSize() const override;
 			
@@ -58,13 +57,12 @@ namespace REHex {
 			SharedDocumentPointer document;
 			SafeWindowPointer<DocumentCtrl> document_ctrl;
 			
-			LLVMDisasmContextRef disassembler;
+			size_t disassembler;
 			
 			wxChoice *arch;
 			CodeCtrl *assembly;
 			
 			void reinit_disassembler();
-			void update();
 			std::map<off_t, Instruction> disassemble(off_t offset, const void *code, size_t size);
 			
 			void OnCursorUpdate(CursorUpdateEvent &event);
