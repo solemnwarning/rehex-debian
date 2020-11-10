@@ -88,6 +88,7 @@ namespace REHex {
 					DiffDataRegion(off_t d_offset, off_t d_length, DiffWindow *diff_window, Range *range);
 					
 				protected:
+					virtual int calc_width(REHex::DocumentCtrl &doc) override;
 					virtual Highlight highlight_at_off(off_t off) const override;
 			};
 			
@@ -98,7 +99,7 @@ namespace REHex {
 			
 			static DiffWindow *instance;
 			
-			std::list<Range>::iterator remove_range(std::list<Range>::iterator range);
+			std::list<Range>::iterator remove_range(std::list<Range>::iterator range, bool called_from_page_closed_handler);
 			
 			void doc_update(Range *range);
 			std::string range_title(Range *range);
@@ -111,7 +112,7 @@ namespace REHex {
 			void OnDocumentDataErase(OffsetLengthEvent &event);
 			void OnDocumentDataInsert(OffsetLengthEvent &event);
 			void OnDocumentDataOverwrite(OffsetLengthEvent &event);
-			void OnDocumentBaseChange(wxCommandEvent &event);
+			void OnDocumentDisplaySettingsChange(wxCommandEvent &event);
 			void OnNotebookClosed(wxAuiNotebookEvent &event);
 			void OnCursorUpdate(CursorUpdateEvent &event);
 			void OnDataRightClick(wxCommandEvent &event);

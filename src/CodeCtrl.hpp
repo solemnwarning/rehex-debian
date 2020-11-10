@@ -52,7 +52,7 @@ namespace REHex {
 			
 			typedef std::pair<int, int> CodeCharRef;
 			
-			wxFont *font;
+			wxFont font;
 			int font_width;
 			int font_height;
 			int code_xoff;
@@ -88,6 +88,7 @@ namespace REHex {
 			void select_all();
 			
 			void OnPaint(wxPaintEvent &event);
+			void OnErase(wxEraseEvent &event);
 			void OnSize(wxSizeEvent &event);
 			void OnScroll(wxScrollWinEvent &event);
 			void OnWheel(wxMouseEvent &event);

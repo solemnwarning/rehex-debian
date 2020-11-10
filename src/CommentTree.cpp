@@ -15,6 +15,7 @@
  * Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 */
 
+#include "platform.hpp"
 #include <stack>
 #include <utility>
 #include <wx/clipbrd.h>
@@ -85,6 +86,11 @@ void REHex::CommentTree::save_state(wxConfig *config) const
 void REHex::CommentTree::load_state(wxConfig *config)
 {
 	/* No state to load. */
+}
+
+void REHex::CommentTree::update()
+{
+	/* Nothing to update */
 }
 
 wxSize REHex::CommentTree::DoGetBestClientSize() const
