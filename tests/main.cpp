@@ -15,16 +15,26 @@
  * Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 */
 
+#include "../src/platform.hpp"
 #include <gtest/gtest.h>
 #include <wx/app.h>
 #include <wx/init.h>
 
 #include "../src/ArtProvider.hpp"
+#include "../src/Palette.hpp"
 
 wxApp &wxGetApp()
 {
        return *wxTheApp;
 }
+
+struct Cleanup
+{
+	~Cleanup()
+	{
+		delete REHex::active_palette;
+	}
+};
 
 int main(int argc, char **argv)
 {
@@ -34,6 +44,9 @@ int main(int argc, char **argv)
 	wxImage::AddHandler(new wxPNGHandler);
 	REHex::ArtProvider::init();
 	
+	REHex::active_palette = REHex::Palette::create_system_palette();
+	Cleanup cleanup;
+
 	testing::InitGoogleTest(&argc, argv);
 	return RUN_ALL_TESTS();
 }

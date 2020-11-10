@@ -15,6 +15,7 @@
  * Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 */
 
+#include "platform.hpp"
 #include <exception>
 #include <inttypes.h>
 #include <stack>
@@ -24,6 +25,7 @@
 #include <wx/sizer.h>
 
 #include "app.hpp"
+#include "DataType.hpp"
 #include "DiffWindow.hpp"
 #include "EditCommentDialog.hpp"
 #include "Tab.hpp"
@@ -86,6 +88,7 @@ REHex::Tab::Tab(wxWindow *parent):
 	doc_ctrl->Bind(       CURSOR_UPDATE,          &REHex::Tab::OnDocumentCtrlCursorUpdate,  this);
 	doc.auto_cleanup_bind(EV_COMMENT_MODIFIED,    &REHex::Tab::OnDocumentCommentModified,   this);
 	doc.auto_cleanup_bind(EV_HIGHLIGHTS_CHANGED,  &REHex::Tab::OnDocumenHighlightsChanged,  this);
+	doc.auto_cleanup_bind(EV_TYPES_CHANGED,       &REHex::Tab::OnDocumentDataTypesChanged,  this);
 	
 	doc_ctrl->Bind(wxEVT_CHAR, &REHex::Tab::OnDocumentCtrlChar, this);
 	
@@ -140,6 +143,7 @@ REHex::Tab::Tab(wxWindow *parent, const std::string &filename):
 	doc_ctrl->Bind(       CURSOR_UPDATE,          &REHex::Tab::OnDocumentCtrlCursorUpdate,  this);
 	doc.auto_cleanup_bind(EV_COMMENT_MODIFIED,    &REHex::Tab::OnDocumentCommentModified,   this);
 	doc.auto_cleanup_bind(EV_HIGHLIGHTS_CHANGED,  &REHex::Tab::OnDocumenHighlightsChanged,  this);
+	doc.auto_cleanup_bind(EV_TYPES_CHANGED,  &REHex::Tab::OnDocumentDataTypesChanged,  this);
 	
 	doc_ctrl->Bind(wxEVT_CHAR, &REHex::Tab::OnDocumentCtrlChar, this);
 	
@@ -206,6 +210,8 @@ void REHex::Tab::tool_create(const std::string &name, bool switch_to, wxConfig *
 		
 		tools.insert(std::make_pair(name, tool_window));
 		
+		xtools_fix_visibility(v_tools);
+		
 		if(adjust)
 		{
 			vtools_adjust_on_idle();
@@ -222,6 +228,8 @@ void REHex::Tab::tool_create(const std::string &name, bool switch_to, wxConfig *
 		h_tools->AddPage(tool_window, tpr->label, switch_to);
 		
 		tools.insert(std::make_pair(name, tool_window));
+		
+		xtools_fix_visibility(h_tools);
 		
 		if(adjust)
 		{
@@ -248,6 +256,8 @@ void REHex::Tab::tool_destroy(const std::string &name)
 	assert(page_idx != wxNOT_FOUND);
 	
 	notebook->DeletePage(page_idx);
+	
+	xtools_fix_visibility(notebook);
 	
 	if(notebook == v_tools)
 	{
@@ -370,7 +380,7 @@ void REHex::Tab::paste_text(const std::string &text)
 			std::vector<unsigned char> clipboard_data = REHex::parse_hex_string(text);
 			paste_data(clipboard_data.data(), clipboard_data.size());
 		}
-		catch(const REHex::ParseError &e)
+		catch(const REHex::ParseError &)
 		{
 			/* Ignore paste if clipboard didn't contain a valid hex string. */
 		}
@@ -418,11 +428,51 @@ void REHex::Tab::OnSize(wxSizeEvent &event)
 
 void REHex::Tab::OnHToolChange(wxNotebookEvent& event)
 {
+	if (event.GetOldSelection() != wxNOT_FOUND)
+	{
+		wxWindow* page = h_tools->GetPage(event.GetOldSelection());
+		assert(page != NULL);
+		
+		ToolPanel* tp = dynamic_cast<ToolPanel*>(page);
+		assert(tp != NULL);
+		tp->set_visible(false);
+	}
+	
+	if (event.GetSelection() != wxNOT_FOUND)
+	{
+		wxWindow* page = h_tools->GetPage(event.GetSelection());
+		assert(page != NULL);
+		
+		ToolPanel* tp = dynamic_cast<ToolPanel*>(page);
+		assert(tp != NULL);
+		tp->set_visible(true);
+	}
+	
 	htools_adjust();
 }
 
 void REHex::Tab::OnVToolChange(wxBookCtrlEvent &event)
 {
+	if (event.GetOldSelection() != wxNOT_FOUND)
+	{
+		wxWindow* page = v_tools->GetPage(event.GetOldSelection());
+		assert(page != NULL);
+
+		ToolPanel* tp = dynamic_cast<ToolPanel*>(page);
+		assert(tp != NULL);
+		tp->set_visible(false);
+	}
+	
+	if (event.GetSelection() != wxNOT_FOUND)
+	{
+		wxWindow* page = v_tools->GetPage(event.GetSelection());
+		assert(page != NULL);
+
+		ToolPanel* tp = dynamic_cast<ToolPanel*>(page);
+		assert(tp != NULL);
+		tp->set_visible(true);
+	}
+	
 	vtools_adjust();
 }
 
@@ -458,6 +508,12 @@ void REHex::Tab::OnSearchDialogDestroy(wxWindowDestroyEvent &event)
 
 void REHex::Tab::OnDocumentCtrlChar(wxKeyEvent &event)
 {
+	if(doc_ctrl->region_OnChar(event))
+	{
+		/* Key press handled by cursor region. */
+		return;
+	}
+	
 	int key       = event.GetKeyCode();
 	int modifiers = event.GetModifiers();
 	
@@ -812,6 +868,61 @@ void REHex::Tab::OnDataRightClick(wxCommandEvent &event)
 	
 	if(selection_length > 0)
 	{
+		const ByteRangeMap<std::string> &data_types = doc->get_data_types();
+		
+		auto selection_off_type = data_types.get_range(selection_off);
+		assert(selection_off_type != data_types.end());
+		
+		wxMenu *dtmenu = new wxMenu();
+		
+		wxMenuItem *data_itm = dtmenu->AppendCheckItem(wxID_ANY, "Data");
+		
+		if((selection_off_type->first.offset + selection_off_type->first.length) >= (selection_off + selection_length)
+			&& selection_off_type->second == "")
+		{
+			data_itm->Check(true);
+		}
+		
+		#ifdef _WIN32
+		menu.Bind(wxEVT_MENU, [this, selection_off, selection_length](wxCommandEvent &event)
+		#else
+		dtmenu->Bind(wxEVT_MENU, [this, selection_off, selection_length](wxCommandEvent &event)
+		#endif
+		{
+			doc->set_data_type(selection_off, selection_length, "");
+		}, data_itm->GetId(), data_itm->GetId());
+		
+		for(auto dt = DataTypeRegistry::begin(); dt != DataTypeRegistry::end(); ++dt)
+		{
+			if(dt->second->fixed_size >= 0 && (selection_length % dt->second->fixed_size) != 0)
+			{
+				/* Selection is too short/long for this type. */
+				continue;
+			}
+			
+			wxMenuItem *itm = dtmenu->AppendCheckItem(wxID_ANY, dt->second->label);
+			
+			if((selection_off_type->first.offset + selection_off_type->first.length) >= (selection_off + selection_length)
+				&& selection_off_type->second == dt->second->name)
+			{
+				itm->Check(true);
+			}
+			
+			#ifdef _WIN32
+			menu.Bind(wxEVT_MENU, [this, dt, selection_off, selection_length](wxCommandEvent &event)
+			#else
+			dtmenu->Bind(wxEVT_MENU, [this, dt, selection_off, selection_length](wxCommandEvent &event)
+			#endif
+			{
+				doc->set_data_type(selection_off, selection_length, dt->second->name);
+			}, itm->GetId(), itm->GetId());
+		}
+		
+		menu.AppendSubMenu(dtmenu, "Set data type");
+	}
+	
+	if(selection_length > 0)
+	{
 		menu.AppendSeparator();
 		wxMenuItem *itm = menu.Append(wxID_ANY, "Compare...");
 		
@@ -893,6 +1004,12 @@ void REHex::Tab::OnDocumentCommentModified(wxCommandEvent &event)
 void REHex::Tab::OnDocumenHighlightsChanged(wxCommandEvent &event)
 {
 	doc_ctrl->Refresh();
+	event.Skip();
+}
+
+void REHex::Tab::OnDocumentDataTypesChanged(wxCommandEvent &event)
+{
+	repopulate_regions();
 	event.Skip();
 }
 
@@ -1071,12 +1188,34 @@ void REHex::Tab::htools_adjust_now_idle(wxIdleEvent &event)
 	htools_adjust();
 }
 
+/* wxEVT_NOTEBOOK_PAGE_CHANGED events aren't generated consistently between platforms and versions
+ * of wxWidgets when the selected tab is changed due to adding/removing a page, so this method is
+ * used to correct the visible state of all ToolPanel's in a notebook after adding or removing one.
+*/
+void REHex::Tab::xtools_fix_visibility(wxNotebook *notebook)
+{
+	size_t n_pages    = notebook->GetPageCount();
+	int selected_page = notebook->GetSelection();
+	
+	for(size_t i = 0; i < n_pages; ++i)
+	{
+		wxWindow* page = notebook->GetPage(i);
+		assert(page != NULL);
+		
+		ToolPanel* tp = dynamic_cast<ToolPanel*>(page);
+		assert(tp != NULL);
+		
+		bool this_tab_is_selected = ((int)(i) == selected_page);
+		tp->set_visible(this_tab_is_selected);
+	}
+}
+
 void REHex::Tab::init_default_doc_view()
 {
 	wxConfig *config = wxGetApp().config;
 	config->SetPath("/default-view/");
 	
-	doc_ctrl->set_bytes_per_line(             config->Read    ("bytes-per-line",             doc_ctrl->get_bytes_per_line()));
+	doc_ctrl->set_bytes_per_line(             config->ReadLong("bytes-per-line",             doc_ctrl->get_bytes_per_line()));
 	doc_ctrl->set_bytes_per_group(            config->Read    ("bytes-per-group",            doc_ctrl->get_bytes_per_group()));
 	doc_ctrl->set_show_offsets(               config->ReadBool("show-offsets",               doc_ctrl->get_show_offsets()));
 	doc_ctrl->set_show_ascii(                 config->ReadBool("show-ascii",                 doc_ctrl->get_show_ascii()));
@@ -1130,18 +1269,14 @@ void REHex::Tab::init_default_tools()
 
 void REHex::Tab::repopulate_regions()
 {
-	if(inline_comment_mode == ICM_HIDDEN)
-	{
-		/* Inline comments are hidden. Just show a single big data region. */
-		
-		std::list<DocumentCtrl::Region*> regions;
-		regions.push_back(new DocumentCtrl::DataRegionDocHighlight(0, doc->buffer_length(), *doc));
-		doc_ctrl->replace_all_regions(regions);
-		
-		return;
-	}
-	
+	std::vector<DocumentCtrl::Region*> regions = compute_regions(doc, inline_comment_mode);
+	doc_ctrl->replace_all_regions(regions);
+}
+
+std::vector<REHex::DocumentCtrl::Region*> REHex::Tab::compute_regions(SharedDocumentPointer doc, InlineCommentMode inline_comment_mode)
+{
 	auto comments = doc->get_comments();
+	auto types = doc->get_data_types();
 	
 	bool nest = (inline_comment_mode == ICM_SHORT_INDENT || inline_comment_mode == ICM_FULL_INDENT);
 	bool truncate = (inline_comment_mode == ICM_SHORT || inline_comment_mode == ICM_SHORT_INDENT);
@@ -1149,14 +1284,26 @@ void REHex::Tab::repopulate_regions()
 	/* Construct a list of interlaced comment/data regions. */
 	
 	auto offset_base = comments.begin();
+	auto types_iter = types.begin();
 	off_t next_data = 0, remain_data = doc->buffer_length();
 	
-	std::list<DocumentCtrl::Region*> regions;
+	if(inline_comment_mode == ICM_HIDDEN)
+	{
+		/* Inline comments are hidden. Skip over the comments. */
+		offset_base = comments.end();
+	}
+	
+	std::vector<DocumentCtrl::Region*> regions;
 	std::stack<off_t> dr_limit;
 	
 	while(remain_data > 0)
 	{
 		assert(offset_base == comments.end() || offset_base->first.offset >= next_data);
+		
+		while(!dr_limit.empty() && dr_limit.top() <= next_data)
+		{
+			dr_limit.pop();
+		}
 		
 		/* We process any comments at the same offset from largest to smallest, ensuring
 		 * smaller comments are parented to the next-larger one at the same offset.
@@ -1196,18 +1343,42 @@ void REHex::Tab::repopulate_regions()
 			dr_length = offset_base->first.offset - next_data;
 		}
 		
-		while(!dr_limit.empty() && (next_data + dr_length) >= dr_limit.top())
+		if(!dr_limit.empty() && (next_data + dr_length) >= dr_limit.top())
 		{
 			assert(dr_limit.top() > next_data);
 			
 			dr_length = dr_limit.top() - next_data;
-			dr_limit.pop();
 		}
 		
-		regions.push_back(new DocumentCtrl::DataRegionDocHighlight(next_data, dr_length, *doc));
+		assert(types_iter != types.end());
+		assert(types_iter->first.offset <= next_data && (types_iter->first.offset + types_iter->first.length) > next_data);
+		
+		dr_length = std::min(
+			dr_length,
+			types_iter->first.length - (next_data - types_iter->first.offset));
+		
+		const DataTypeRegistration *dtr = DataTypeRegistry::by_name(types_iter->second);
+		
+		if(dtr != NULL && dtr->fixed_size <= dr_length)
+		{
+			if(dtr->fixed_size >= 0 && dr_length > dtr->fixed_size)
+			{
+				dr_length = dtr->fixed_size;
+			}
+			
+			regions.push_back(dtr->region_factory(doc, next_data, dr_length));
+		}
+		else{
+			regions.push_back(new DocumentCtrl::DataRegionDocHighlight(next_data, dr_length, *doc));
+		}
 		
 		next_data   += dr_length;
 		remain_data -= dr_length;
+		
+		if(next_data >= (types_iter->first.offset + types_iter->first.length))
+		{
+			++types_iter;
+		}
 	}
 	
 	if(regions.empty())
@@ -1217,6 +1388,15 @@ void REHex::Tab::repopulate_regions()
 		/* Empty buffers need a data region too! */
 		regions.push_back(new DocumentCtrl::DataRegionDocHighlight(0, 0, *doc));
 	}
+	else if(dynamic_cast<DocumentCtrl::DataRegionDocHighlight*>(regions.back()) == NULL)
+	{
+		/* End region isn't a DataRegionDocHighlight - means its a comment or a custom
+		 * data region type. Push one on the end so there's somewhere to put the cursor to
+		 * insert more data at the end.
+		*/
+		
+		regions.push_back(new DocumentCtrl::DataRegionDocHighlight(doc->buffer_length(), 0, *doc));
+	}
 	
-	doc_ctrl->replace_all_regions(regions);
+	return regions;
 }
