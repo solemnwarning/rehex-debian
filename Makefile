@@ -48,17 +48,17 @@ else
 endif
 
 # Define this for releases
-VERSION := 0.2.0
+VERSION := 0.3.0
 
 # NOTE: Not evaluated when building from dist
 GIT_COMMIT_SHA  ?= $(call shell-or-die,git log -1 --format="%H")
 GIT_COMMIT_TIME  = $(call shell-or-die,git log -1 --format="%ct")
 
 ifdef VERSION
-	LONG_VERSION := Version $(VERSION)
+	LONG_VERSION := Version o3o
 else
-	VERSION      := b403cc519f0b9f2e11f6b64062f44ebb0b1dbd2c
-	LONG_VERSION := Snapshot b403cc519f0b9f2e11f6b64062f44ebb0b1dbd2c
+	VERSION      := 7e823f44555b41d443e3fae7460ff6a94c4dd36f
+	LONG_VERSION := Snapshot 7e823f44555b41d443e3fae7460ff6a94c4dd36f
 endif
 
 DEPDIR := .d
@@ -279,8 +279,8 @@ else
 	git ls-files | xargs cp --parents -t rehex-$(VERSION)/
 	
 	# Inline any references to the HEAD commit sha/timestamp
-	sed -i -e "s|\$b403cc519f0b9f2e11f6b64062f44ebb0b1dbd2c|b403cc519f0b9f2e11f6b64062f44ebb0b1dbd2c|g" rehex-$(VERSION)/Makefile
-	sed -i -e "s|\$1591113914|1591113914|g" rehex-$(VERSION)/Makefile
+	sed -i -e "s|\$7e823f44555b41d443e3fae7460ff6a94c4dd36f|7e823f44555b41d443e3fae7460ff6a94c4dd36f|g" rehex-$(VERSION)/Makefile
+	sed -i -e "s|\$1605013060|1605013060|g" rehex-$(VERSION)/Makefile
 endif
 	
 	# Generate reproducible tarball. All files use git commit timestamp.
@@ -288,7 +288,7 @@ endif
 		LC_ALL=C sort -z | \
 		tar \
 			--format=ustar \
-			--mtime=@1591113914 \
+			--mtime=@1605013060 \
 			--owner=0 --group=0 --numeric-owner \
 			--no-recursion --null  -T - \
 			-cf - | \
