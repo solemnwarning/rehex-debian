@@ -1,3 +1,15 @@
+rehex (0.3.1-0~ubuntu2004) focal; urgency=low
+
+  * Correctly display signed 16-bit values in "Decode values" panel.
+
+  * Fix status bar offset going out of sync.
+
+  * Move cursor when a row in the "Comments" panel is double clicked.
+
+  * Focus document after updating position/selection via "Comments" panel.
+
+ -- Daniel Collins <solemnwarning@solemnwarning.net>  Fri, 13 Nov 2020 22:31:15 +0000
+
 rehex (0.3.0-0~ubuntu2004) focal; urgency=low
 
   * [Mark Jansen] Use byte grouping setting from main window in diff window.
