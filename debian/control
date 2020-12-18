@@ -7,6 +7,7 @@ Build-Depends:
  libjansson-dev,
  liblua5.3-dev,
  libwxgtk3.0-dev,
+ lua5.3,
  pkg-config,
  xauth,
  xvfb,
