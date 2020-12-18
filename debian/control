@@ -7,6 +7,7 @@ Build-Depends:
  libjansson-dev,
  libwxgtk3.0-gtk3-dev,
  liblua5.3-dev,
+ pkg-config,
  xauth,
  xvfb,
  wx3.0-headers,
