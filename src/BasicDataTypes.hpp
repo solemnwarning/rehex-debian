@@ -37,6 +37,7 @@ namespace REHex
 	{
 		protected:
 			SharedDocumentPointer doc;
+			off_t virt_offset;
 			
 		private:
 			std::string type_label;
@@ -89,10 +90,13 @@ namespace REHex
 			}
 			
 		protected:
-			NumericDataTypeRegion(SharedDocumentPointer &doc, off_t offset, off_t length, const std::string &type_label):
-				GenericDataRegion(offset, length),
+			NumericDataTypeRegion(SharedDocumentPointer &doc, off_t offset, off_t length, off_t virt_offset, const std::string &type_label):
+				GenericDataRegion(offset, length, virt_offset),
 				doc(doc),
+				virt_offset(virt_offset),
 				type_label(type_label),
+				offset_text_x(-1),
+				data_text_x(-1),
 				input_active(false),
 				input_pos(0)
 			{
@@ -165,7 +169,7 @@ namespace REHex
 				{
 					/* Draw the offsets to the left */
 					
-					std::string offset_str = format_offset(d_offset, doc_ctrl.get_offset_display_base(), doc->buffer_length());
+					std::string offset_str = format_offset(virt_offset, doc_ctrl.get_offset_display_base(), doc->buffer_length());
 					
 					normal_text();
 					dc.DrawText(offset_str, x, y);
@@ -487,13 +491,25 @@ namespace REHex
 				}
 			}
 			
+			virtual ScreenArea screen_areas_at_offset(off_t offset, DocumentCtrl *doc_ctrl) override
+			{
+				assert(offset >= d_offset);
+				assert(offset <= (d_offset + d_length));
+				
+				return SA_HEX; /* We currently don't make use of the SA_SPECIAL
+				                * screen area for our numeric values and
+				                * selectively render them in the hex area instead.
+				               */
+			}
+			
 			virtual bool OnChar(DocumentCtrl *doc_ctrl, wxKeyEvent &event) override
 			{
 				int key = event.GetKeyCode();
 				
 				if((key >= '0' && key <= '9')
 					|| (key >= 'a' && key <= 'z')
-					|| (key >= 'A' && key <= 'Z'))
+					|| (key >= 'A' && key <= 'Z')
+					|| key == '.')
 				{
 					activate();
 					
@@ -718,7 +734,7 @@ namespace REHex
 		class NAME: public NumericDataTypeRegion<T> \
 		{ \
 			public: \
-				NAME(SharedDocumentPointer &doc, off_t offset, off_t length); \
+				NAME(SharedDocumentPointer &doc, off_t offset, off_t length, off_t virt_offset); \
 				\
 			protected: \
 				virtual std::string to_string(const T *data) const override; \
@@ -739,6 +755,11 @@ namespace REHex
 	DECLARE_NDTR_CLASS(U64BEDataRegion, uint64_t)
 	DECLARE_NDTR_CLASS(S64LEDataRegion, int64_t)
 	DECLARE_NDTR_CLASS(S64BEDataRegion, int64_t)
+	
+	DECLARE_NDTR_CLASS(F32LEDataRegion, float);
+	DECLARE_NDTR_CLASS(F32BEDataRegion, float);
+	DECLARE_NDTR_CLASS(F64LEDataRegion, double);
+	DECLARE_NDTR_CLASS(F64BEDataRegion, double);
 }
 
 #endif /* !REHEX_BASICDATATYPES_HPP */
