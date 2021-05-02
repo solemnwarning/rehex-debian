@@ -1,4 +1,34 @@
-rehex (0.3.1-0~ubuntu2104) UNRELEASED; urgency=low
+rehex (0.3.90-0~ubuntu2104) hirsute; urgency=low
+
+  * Show disassembly of machine code in the main document view (#94).
+
+  * Add font size settings to "View" menu (#97).
+
+  * Add float/double types to "Set data type" menu (#104).
+
+  * Fix selection by holding shift and clicking (#109).
+
+  * Initial support for Lua plugins.
+
+  * Process sections from PE EXE/DLL headers (#86).
+
+  * [Mark Jansen] Save size of main window and tool panels (#88).
+
+  * Don't resize tool panels unnecessarily.
+
+  * Fix invalid cursor state when moving between regions.
+
+  * Fix crash when deleting data (#113, #123).
+
+  * Fix opening files with 8-bit filenames, and other encoding issues (#117).
+
+  * Virtual segment mapping and display (#7).
+
+  * Display inline comments by default (didn't always work).
+
+ -- Daniel Collins <solemnwarning@solemnwarning.net>  Sun, 02 May 2021 21:09:21 +0100
+
+rehex (0.3.1-0~ubuntu2010) groovy; urgency=low
 
   * Correctly display signed 16-bit values in "Decode values" panel.
 
@@ -8,7 +38,7 @@ rehex (0.3.1-0~ubuntu2104) UNRELEASED; urgency=low
 
   * Focus document after updating position/selection via "Comments" panel.
 
- -- Daniel Collins <solemnwarning@solemnwarning.net>  Sun, 02 May 2021 14:24:00 +0100
+ -- Daniel Collins <solemnwarning@solemnwarning.net>  Fri, 13 Nov 2020 22:33:10 +0000
 
 rehex (0.3.0-0~ubuntu2010) groovy; urgency=low
 
