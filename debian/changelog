@@ -1,4 +1,4 @@
-rehex (0.3.1-0~ubuntu2010) groovy; urgency=low
+rehex (0.3.1-0~ubuntu2104) UNRELEASED; urgency=low
 
   * Correctly display signed 16-bit values in "Decode values" panel.
 
@@ -8,7 +8,7 @@ rehex (0.3.1-0~ubuntu2010) groovy; urgency=low
 
   * Focus document after updating position/selection via "Comments" panel.
 
- -- Daniel Collins <solemnwarning@solemnwarning.net>  Fri, 13 Nov 2020 22:33:10 +0000
+ -- Daniel Collins <solemnwarning@solemnwarning.net>  Sun, 02 May 2021 14:24:00 +0100
 
 rehex (0.3.0-0~ubuntu2010) groovy; urgency=low
 
