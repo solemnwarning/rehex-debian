@@ -1,5 +1,5 @@
 /* Reverse Engineer's Hex Editor
- * Copyright (C) 2017-2020 Daniel Collins <solemnwarning@solemnwarning.net>
+ * Copyright (C) 2017-2021 Daniel Collins <solemnwarning@solemnwarning.net>
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 as published by
@@ -17,7 +17,7 @@
 
 #include "platform.hpp"
 
-#include "app.hpp"
+#include "App.hpp"
 #include "ArtProvider.hpp"
 #include "mainwindow.hpp"
 #include "Palette.hpp"
@@ -31,6 +31,11 @@ IMPLEMENT_APP(REHex::App);
 
 bool REHex::App::OnInit()
 {
+	locale = new wxLocale(wxLANGUAGE_DEFAULT);
+	console = new ConsoleBuffer();
+	
+	call_setup_hooks(SetupPhase::EARLY);
+	
 	#ifdef _WIN32
 	/* Needed for shell API calls. */
 	CoInitialize(NULL);
@@ -44,6 +49,7 @@ bool REHex::App::OnInit()
 	
 	config->SetPath("/");
 	last_directory = config->Read("last-directory", "");
+	font_size_adjustment = config->ReadLong("font-size-adjustment", 0);
 	
 	/* Display default tool panels if a default view hasn't been configured. */
 	if(!config->HasGroup("/default-view/"))
@@ -79,7 +85,22 @@ bool REHex::App::OnInit()
 		active_palette = Palette::create_system_palette();
 	}
 	
-	REHex::MainWindow *window = new REHex::MainWindow();
+	call_setup_hooks(SetupPhase::READY);
+	
+	wxSize windowSize(740, 540);
+	
+	#ifndef __APPLE__
+	config->Read("/default-view/window-width", &windowSize.x, windowSize.x);
+	config->Read("/default-view/window-height", &windowSize.y, windowSize.y);
+	#endif
+	
+	REHex::MainWindow *window = new REHex::MainWindow(windowSize);
+	
+	#ifndef __APPLE__
+	bool maximise = config->ReadBool("/default-view/window-maximised", false);
+	window->Maximize(maximise);
+	#endif
+	
 	window->Show(true);
 	
 	if(argc > 1)
@@ -93,11 +114,15 @@ bool REHex::App::OnInit()
 		window->new_file();
 	}
 	
+	call_setup_hooks(SetupPhase::DONE);
+	
 	return true;
 }
 
 int REHex::App::OnExit()
 {
+	call_setup_hooks(SetupPhase::SHUTDOWN);
+	
 	config->SetPath("/recent-files/");
 	recent_files->Save(*config);
 	
@@ -112,15 +137,13 @@ int REHex::App::OnExit()
 	CoUninitialize();
 	#endif
 	
+	call_setup_hooks(SetupPhase::SHUTDOWN_LATE);
+	
+	delete console;
+	console = NULL;
+	
+	delete locale;
+	locale = NULL;
+	
 	return 0;
-}
-
-const std::string &REHex::App::get_last_directory()
-{
-	return last_directory;
-}
-
-void REHex::App::set_last_directory(const std::string &last_directory)
-{
-	this->last_directory = last_directory;
 }

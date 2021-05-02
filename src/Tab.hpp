@@ -46,6 +46,13 @@ namespace REHex
 		ICM_MAX          = 4,
 	};
 	
+	enum DocumentDisplayMode {
+		DDM_NORMAL = 0,
+		DDM_VIRTUAL = 1,
+		
+		DDM_MAX = 2,
+	};
+	
 	class Tab: public wxPanel
 	{
 		public:
@@ -58,8 +65,9 @@ namespace REHex
 			DocumentCtrl *doc_ctrl;
 			
 			bool tool_active(const std::string &name);
-			void tool_create(const std::string &name, bool switch_to, wxConfig *config = NULL, bool adjust = true);
+			void tool_create(const std::string &name, bool switch_to, wxConfig *config = NULL);
 			void tool_destroy(const std::string &name);
+			ToolPanel *tool_get(const std::string &name);
 			
 			void search_dialog_register(wxDialog *search_dialog);
 			
@@ -74,11 +82,15 @@ namespace REHex
 			InlineCommentMode get_inline_comment_mode() const;
 			void set_inline_comment_mode(InlineCommentMode inline_comment_mode);
 			
+			DocumentDisplayMode get_document_display_mode() const;
+			void set_document_display_mode(DocumentDisplayMode document_display_mode);
+			
 			/* Public for use by unit tests. */
-			static std::vector<DocumentCtrl::Region*> compute_regions(SharedDocumentPointer doc, InlineCommentMode inline_comment_mode);
+			static std::vector<DocumentCtrl::Region*> compute_regions(SharedDocumentPointer doc, off_t real_offset_base, off_t virt_offset_base, off_t length, InlineCommentMode inline_comment_mode);
 			
 		private:
 			InlineCommentMode inline_comment_mode;
+			DocumentDisplayMode document_display_mode;
 			
 			wxSplitterWindow   *v_splitter;
 			wxSplitterWindow   *h_splitter;
@@ -111,6 +123,7 @@ namespace REHex
 			void OnDocumentCommentModified(wxCommandEvent &event);
 			void OnDocumenHighlightsChanged(wxCommandEvent &event);
 			void OnDocumentDataTypesChanged(wxCommandEvent &event);
+			void OnDocumentMappingsChanged(wxCommandEvent &event);
 			
 			template<typename T> void OnEventToForward(T &event)
 			{
@@ -120,11 +133,19 @@ namespace REHex
 				ProcessWindowEvent(event_copy);
 			}
 			
-			void vtools_adjust();
-			void htools_adjust();
-			void vtools_adjust_on_idle();
+			bool vtools_adjust_pending;
+			bool vtools_adjust_force;
+			int vtools_initial_size;
+			
+			bool htools_adjust_pending;
+			bool htools_adjust_force;
+			int htools_initial_size;
+			
+			void vtools_adjust(bool force_resize = false);
+			void htools_adjust(bool force_resize = false);
+			void vtools_adjust_on_idle(bool force_resize);
 			void vtools_adjust_now_idle(wxIdleEvent &event);
-			void htools_adjust_on_idle();
+			void htools_adjust_on_idle(bool force_resize);
 			void htools_adjust_now_idle(wxIdleEvent &event);
 			void xtools_fix_visibility(wxNotebook *notebook);
 			
