@@ -1,5 +1,5 @@
 /* Reverse Engineer's Hex Editor
- * Copyright (C) 2017-2020 Daniel Collins <solemnwarning@solemnwarning.net>
+ * Copyright (C) 2017-2021 Daniel Collins <solemnwarning@solemnwarning.net>
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 as published by
@@ -20,15 +20,17 @@
 #include <inttypes.h>
 #include <stack>
 #include <tuple>
+#include <vector>
 #include <wx/clipbrd.h>
 #include <wx/dataobj.h>
 #include <wx/sizer.h>
 
-#include "app.hpp"
+#include "App.hpp"
 #include "DataType.hpp"
 #include "DiffWindow.hpp"
 #include "EditCommentDialog.hpp"
 #include "Tab.hpp"
+#include "VirtualMappingDialog.hpp"
 
 /* Is the given byte a printable 7-bit ASCII character? */
 static bool isasciiprint(int c)
@@ -68,7 +70,15 @@ END_EVENT_TABLE()
 
 REHex::Tab::Tab(wxWindow *parent):
 	wxPanel(parent),
-	doc(SharedDocumentPointer::make())
+	doc(SharedDocumentPointer::make()),
+	inline_comment_mode(ICM_FULL_INDENT),
+	document_display_mode(DDM_NORMAL),
+	vtools_adjust_pending(false),
+	vtools_adjust_force(false),
+	vtools_initial_size(-1),
+	htools_adjust_pending(false),
+	htools_adjust_force(false),
+	htools_initial_size(-1)
 {
 	v_splitter = new wxSplitterWindow(this, ID_VSPLITTER, wxDefaultPosition, wxDefaultSize, (wxSP_3D | wxSP_LIVE_UPDATE));
 	v_splitter->SetSashGravity(1.0);
@@ -89,6 +99,7 @@ REHex::Tab::Tab(wxWindow *parent):
 	doc.auto_cleanup_bind(EV_COMMENT_MODIFIED,    &REHex::Tab::OnDocumentCommentModified,   this);
 	doc.auto_cleanup_bind(EV_HIGHLIGHTS_CHANGED,  &REHex::Tab::OnDocumenHighlightsChanged,  this);
 	doc.auto_cleanup_bind(EV_TYPES_CHANGED,       &REHex::Tab::OnDocumentDataTypesChanged,  this);
+	doc.auto_cleanup_bind(EV_MAPPINGS_CHANGED,    &REHex::Tab::OnDocumentMappingsChanged,   this);
 	
 	doc_ctrl->Bind(wxEVT_CHAR, &REHex::Tab::OnDocumentCtrlChar, this);
 	
@@ -115,15 +126,23 @@ REHex::Tab::Tab(wxWindow *parent):
 	sizer->Add(v_splitter, 1, wxEXPAND);
 	SetSizerAndFit(sizer);
 	
-	init_default_tools();
+	htools_adjust_on_idle(true);
+	vtools_adjust_on_idle(true);
 	
-	htools_adjust_on_idle();
-	vtools_adjust_on_idle();
+	init_default_tools();
 }
 
 REHex::Tab::Tab(wxWindow *parent, const std::string &filename):
 	wxPanel(parent),
-	doc(SharedDocumentPointer::make(filename))
+	doc(SharedDocumentPointer::make(filename)),
+	inline_comment_mode(ICM_FULL_INDENT),
+	document_display_mode(DDM_NORMAL),
+	vtools_adjust_pending(false),
+	vtools_adjust_force(false),
+	vtools_initial_size(-1),
+	htools_adjust_pending(false),
+	htools_adjust_force(false),
+	htools_initial_size(-1)
 {
 	v_splitter = new wxSplitterWindow(this, ID_VSPLITTER, wxDefaultPosition, wxDefaultSize, (wxSP_3D | wxSP_LIVE_UPDATE));
 	v_splitter->SetSashGravity(1.0);
@@ -143,7 +162,8 @@ REHex::Tab::Tab(wxWindow *parent, const std::string &filename):
 	doc_ctrl->Bind(       CURSOR_UPDATE,          &REHex::Tab::OnDocumentCtrlCursorUpdate,  this);
 	doc.auto_cleanup_bind(EV_COMMENT_MODIFIED,    &REHex::Tab::OnDocumentCommentModified,   this);
 	doc.auto_cleanup_bind(EV_HIGHLIGHTS_CHANGED,  &REHex::Tab::OnDocumenHighlightsChanged,  this);
-	doc.auto_cleanup_bind(EV_TYPES_CHANGED,  &REHex::Tab::OnDocumentDataTypesChanged,  this);
+	doc.auto_cleanup_bind(EV_TYPES_CHANGED,       &REHex::Tab::OnDocumentDataTypesChanged,  this);
+	doc.auto_cleanup_bind(EV_MAPPINGS_CHANGED,    &REHex::Tab::OnDocumentMappingsChanged,   this);
 	
 	doc_ctrl->Bind(wxEVT_CHAR, &REHex::Tab::OnDocumentCtrlChar, this);
 	
@@ -169,10 +189,10 @@ REHex::Tab::Tab(wxWindow *parent, const std::string &filename):
 	sizer->Add(v_splitter, 1, wxEXPAND);
 	SetSizerAndFit(sizer);
 	
-	init_default_tools();
+	vtools_adjust_on_idle(true);
+	htools_adjust_on_idle(true);
 	
-	htools_adjust_on_idle();
-	vtools_adjust_on_idle();
+	init_default_tools();
 }
 
 REHex::Tab::~Tab()
@@ -188,7 +208,7 @@ bool REHex::Tab::tool_active(const std::string &name)
 	return tools.find(name) != tools.end();
 }
 
-void REHex::Tab::tool_create(const std::string &name, bool switch_to, wxConfig *config, bool adjust)
+void REHex::Tab::tool_create(const std::string &name, bool switch_to, wxConfig *config)
 {
 	if(tool_active(name))
 	{
@@ -211,11 +231,7 @@ void REHex::Tab::tool_create(const std::string &name, bool switch_to, wxConfig *
 		tools.insert(std::make_pair(name, tool_window));
 		
 		xtools_fix_visibility(v_tools);
-		
-		if(adjust)
-		{
-			vtools_adjust_on_idle();
-		}
+		vtools_adjust_on_idle(false);
 	}
 	else if(tpr->shape == ToolPanel::TPS_WIDE)
 	{
@@ -230,11 +246,7 @@ void REHex::Tab::tool_create(const std::string &name, bool switch_to, wxConfig *
 		tools.insert(std::make_pair(name, tool_window));
 		
 		xtools_fix_visibility(h_tools);
-		
-		if(adjust)
-		{
-			htools_adjust_on_idle();
-		}
+		htools_adjust_on_idle(false);
 	}
 }
 
@@ -269,6 +281,18 @@ void REHex::Tab::tool_destroy(const std::string &name)
 	}
 }
 
+REHex::ToolPanel *REHex::Tab::tool_get(const std::string &name)
+{
+	auto t = tools.find(name);
+	if(t != tools.end())
+	{
+		return t->second;
+	}
+	else{
+		return NULL;
+	}
+}
+
 void REHex::Tab::search_dialog_register(wxDialog *search_dialog)
 {
 	search_dialogs.insert(search_dialog);
@@ -293,10 +317,7 @@ void REHex::Tab::unhide_child_windows()
 
 void REHex::Tab::save_view(wxConfig *config)
 {
-	config->SetPath("/");
-	config->Write("theme", wxString(active_palette->get_name()));
-	
-	config->DeleteGroup("/default-view/");
+	// Ensure we are in the correct node
 	config->SetPath("/default-view/");
 	
 	config->Write("bytes-per-line", doc_ctrl->get_bytes_per_line());
@@ -307,7 +328,37 @@ void REHex::Tab::save_view(wxConfig *config)
 	config->Write("highlight-selection-match", doc_ctrl->get_highlight_selection_match());
 	config->Write("offset-display-base", (int)(doc_ctrl->get_offset_display_base()));
 	
-	/* TODO: Save h_tools state */
+	wxWindow *ht_current_page = h_tools->GetCurrentPage();
+	if(ht_current_page != NULL)
+	{
+		config->SetPath("/default-view/htools/");
+		config->Write("height", ht_current_page->GetSize().y);
+	}
+	
+	for(size_t i = 0; i < h_tools->GetPageCount(); ++i)
+	{
+		char path[64];
+		snprintf(path, sizeof(path), "/default-view/htools/panels/0/tab/%u/", (unsigned)(i));
+		
+		config->SetPath(path);
+		
+		wxWindow *page = h_tools->GetPage(i);
+		assert(page != NULL);
+		
+		ToolPanel *tp = dynamic_cast<ToolPanel*>(page);
+		assert(tp != NULL);
+		
+		config->Write("name", wxString(tp->name()));
+		config->Write("selected", (page == h_tools->GetCurrentPage()));
+		tp->save_state(config);
+	}
+	
+	wxWindow *vt_current_page = v_tools->GetCurrentPage();
+	if(vt_current_page != NULL)
+	{
+		config->SetPath("/default-view/vtools/");
+		config->Write("width", vt_current_page->GetSize().x);
+	}
 	
 	for(size_t i = 0; i < v_tools->GetPageCount(); ++i)
 	{
@@ -398,6 +449,17 @@ void REHex::Tab::set_inline_comment_mode(InlineCommentMode inline_comment_mode)
 	repopulate_regions();
 }
 
+REHex::DocumentDisplayMode REHex::Tab::get_document_display_mode() const
+{
+	return document_display_mode;
+}
+
+void REHex::Tab::set_document_display_mode(DocumentDisplayMode document_display_mode)
+{
+	this->document_display_mode = document_display_mode;
+	repopulate_regions();
+}
+
 void REHex::Tab::OnSize(wxSizeEvent &event)
 {
 	if(h_splitter->IsSplit())
@@ -448,7 +510,7 @@ void REHex::Tab::OnHToolChange(wxNotebookEvent& event)
 		tp->set_visible(true);
 	}
 	
-	htools_adjust();
+	htools_adjust_on_idle(false);
 }
 
 void REHex::Tab::OnVToolChange(wxBookCtrlEvent &event)
@@ -473,7 +535,7 @@ void REHex::Tab::OnVToolChange(wxBookCtrlEvent &event)
 		tp->set_visible(true);
 	}
 	
-	vtools_adjust();
+	vtools_adjust_on_idle(false);
 }
 
 void REHex::Tab::OnHSplitterSashPosChanging(wxSplitterEvent &event)
@@ -527,7 +589,7 @@ void REHex::Tab::OnDocumentCtrlChar(wxKeyEvent &event)
 	
 	Document::CursorState cursor_state = doc_ctrl->get_cursor_state();
 	
-	if(cursor_state != Document::CSTATE_ASCII && (modifiers == wxMOD_NONE || modifiers == wxMOD_SHIFT) && isasciihex(key))
+	if(doc_ctrl->hex_view_active() && (modifiers == wxMOD_NONE || modifiers == wxMOD_SHIFT) && isasciihex(key))
 	{
 		unsigned char nibble = REHex::parse_ascii_nibble(key);
 		
@@ -574,7 +636,7 @@ void REHex::Tab::OnDocumentCtrlChar(wxKeyEvent &event)
 		
 		return;
 	}
-	else if(cursor_state == Document::CSTATE_ASCII && (modifiers == wxMOD_NONE || modifiers == wxMOD_SHIFT) && isasciiprint(key))
+	else if(doc_ctrl->ascii_view_active() && (modifiers == wxMOD_NONE || modifiers == wxMOD_SHIFT) && isasciiprint(key))
 	{
 		unsigned char byte = key;
 		
@@ -605,7 +667,7 @@ void REHex::Tab::OnDocumentCtrlChar(wxKeyEvent &event)
 		{
 			if(selection_length > 0)
 			{
-				doc->erase_data(selection_off, selection_length, (selection_off - 1), Document::CSTATE_GOTO, "delete selection");
+				doc->erase_data(selection_off, selection_length, selection_off, Document::CSTATE_GOTO, "delete selection");
 				doc_ctrl->clear_selection();
 			}
 			else if((cursor_pos + 1) < doc->buffer_length())
@@ -623,7 +685,7 @@ void REHex::Tab::OnDocumentCtrlChar(wxKeyEvent &event)
 		{
 			if(selection_length > 0)
 			{
-				doc->erase_data(selection_off, selection_length, (selection_off - 1), Document::CSTATE_GOTO, "delete selection");
+				doc->erase_data(selection_off, selection_length, selection_off, Document::CSTATE_GOTO, "delete selection");
 				doc_ctrl->clear_selection();
 			}
 			else if(cursor_state == Document::CSTATE_HEX_MID)
@@ -656,13 +718,26 @@ void REHex::Tab::OnDocumentCtrlChar(wxKeyEvent &event)
 
 void REHex::Tab::OnCommentLeftClick(OffsetLengthEvent &event)
 {
-	EditCommentDialog::run_modal(this, doc, event.offset, event.length);
+	off_t c_offset = event.offset;
+	off_t c_length = event.length;
+	
+	if(c_offset < 0)
+	{
+		return;
+	}
+	
+	EditCommentDialog::run_modal(this, doc, c_offset, c_length);
 }
 
 void REHex::Tab::OnCommentRightClick(OffsetLengthEvent &event)
 {
 	off_t c_offset = event.offset;
 	off_t c_length = event.length;
+	
+	if(c_offset < 0)
+	{
+		return;
+	}
 	
 	wxMenu menu;
 	
@@ -883,6 +958,8 @@ void REHex::Tab::OnDataRightClick(wxCommandEvent &event)
 			data_itm->Check(true);
 		}
 		
+		dtmenu->AppendSeparator();
+		
 		#ifdef _WIN32
 		menu.Bind(wxEVT_MENU, [this, selection_off, selection_length](wxCommandEvent &event)
 		#else
@@ -892,18 +969,38 @@ void REHex::Tab::OnDataRightClick(wxCommandEvent &event)
 			doc->set_data_type(selection_off, selection_length, "");
 		}, data_itm->GetId(), data_itm->GetId());
 		
-		for(auto dt = DataTypeRegistry::begin(); dt != DataTypeRegistry::end(); ++dt)
+		std::vector<const DataTypeRegistration*> sorted_dts = DataTypeRegistry::sorted_by_group();
+		
+		wxMenu *group_menu = dtmenu;
+		wxMenuItem *gm_item = NULL;
+		
+		for(auto dti = sorted_dts.begin(); dti != sorted_dts.end(); ++dti)
 		{
-			if(dt->second->fixed_size >= 0 && (selection_length % dt->second->fixed_size) != 0)
+			const DataTypeRegistration *dt = *dti;
+			
+			if(dt->fixed_size >= 0 && (selection_length % dt->fixed_size) != 0)
 			{
 				/* Selection is too short/long for this type. */
 				continue;
 			}
 			
-			wxMenuItem *itm = dtmenu->AppendCheckItem(wxID_ANY, dt->second->label);
+			if(!dt->group.empty())
+			{
+				if(gm_item == NULL || gm_item->GetItemLabel() != dt->group)
+				{
+					group_menu = new wxMenu;
+					gm_item = dtmenu->AppendSubMenu(group_menu, dt->group);
+				}
+			}
+			else{
+				group_menu = dtmenu;
+				gm_item = NULL;
+			}
+			
+			wxMenuItem *itm = group_menu->AppendCheckItem(wxID_ANY, dt->label);
 			
 			if((selection_off_type->first.offset + selection_off_type->first.length) >= (selection_off + selection_length)
-				&& selection_off_type->second == dt->second->name)
+				&& selection_off_type->second == dt->name)
 			{
 				itm->Check(true);
 			}
@@ -911,14 +1008,22 @@ void REHex::Tab::OnDataRightClick(wxCommandEvent &event)
 			#ifdef _WIN32
 			menu.Bind(wxEVT_MENU, [this, dt, selection_off, selection_length](wxCommandEvent &event)
 			#else
-			dtmenu->Bind(wxEVT_MENU, [this, dt, selection_off, selection_length](wxCommandEvent &event)
+			group_menu->Bind(wxEVT_MENU, [this, dt, selection_off, selection_length](wxCommandEvent &event)
 			#endif
 			{
-				doc->set_data_type(selection_off, selection_length, dt->second->name);
+				doc->set_data_type(selection_off, selection_length, dt->name);
 			}, itm->GetId(), itm->GetId());
 		}
 		
 		menu.AppendSubMenu(dtmenu, "Set data type");
+		
+		wxMenuItem *vm_itm = menu.Append(wxID_ANY, "Set virtual address mapping...");
+		
+		menu.Bind(wxEVT_MENU, [&](wxCommandEvent &event)
+		{
+			VirtualMappingDialog d(this, doc, selection_off, selection_length);
+			d.ShowModal();
+		}, vm_itm->GetId(), vm_itm->GetId());
 	}
 	
 	if(selection_length > 0)
@@ -1013,6 +1118,16 @@ void REHex::Tab::OnDocumentDataTypesChanged(wxCommandEvent &event)
 	event.Skip();
 }
 
+void REHex::Tab::OnDocumentMappingsChanged(wxCommandEvent &event)
+{
+	if(document_display_mode == DDM_VIRTUAL)
+	{
+		repopulate_regions();
+	}
+	
+	event.Skip();
+}
+
 int REHex::Tab::hsplit_clamp_sash(int sash_position)
 {
 	/* Prevent the user resizing a tool panel beyond its min/max size.
@@ -1095,8 +1210,14 @@ int REHex::Tab::vsplit_clamp_sash(int sash_position)
 	return sash_position;
 }
 
-void REHex::Tab::vtools_adjust()
+void REHex::Tab::vtools_adjust(bool force_resize)
 {
+	if(vtools_adjust_pending)
+	{
+		vtools_adjust_on_idle(force_resize);
+		return;
+	}
+	
 	wxWindow *vt_current_page = v_tools->GetCurrentPage();
 	
 	if(vt_current_page == NULL || !vt_current_page->IsShown())
@@ -1111,23 +1232,59 @@ void REHex::Tab::vtools_adjust()
 		if(!v_splitter->IsSplit())
 		{
 			v_splitter->SplitVertically(h_splitter, v_tools);
+			
+			vtools_adjust_on_idle(true);
+			return;
 		}
 		
 		int vtp_bw = std::max(vt_current_page->GetBestSize().GetWidth(), 0);
+		int vtp_mw = vt_current_page->GetMinSize().GetWidth();
+		int vtp_Mw = vt_current_page->GetMaxSize().GetWidth();
 		
-		/* Size overhead added by v_tools wxNotebook. */
-		int extra_w = v_tools->GetSize().GetWidth() - vt_current_page->GetSize().GetWidth();
+		int vtp_cw = vt_current_page->GetSize().GetWidth();
 		
-		/* Set the current position of the splitter to display the best size of the current
-		 * page and overhead.
-		*/
-		int vs_cw = v_splitter->GetClientSize().GetWidth();
-		v_splitter->SetSashPosition(vs_cw - (vtp_bw + extra_w + v_splitter->GetSashSize()));
+		if(vtools_initial_size > 0)
+		{
+			/* Adjust sash to fit saved ToolPanel size. */
+			
+			int adj_width = vtools_initial_size - vtp_cw;
+			v_splitter->SetSashPosition(v_splitter->GetSashPosition() - adj_width);
+		}
+		else if(force_resize)
+		{
+			/* Adjust sash to fit ToolPanel best size. */
+			
+			int adj_width = vtp_bw - vtp_cw;
+			v_splitter->SetSashPosition(v_splitter->GetSashPosition() - adj_width);
+		}
+		else if(vtp_mw > 0 && vtp_cw < vtp_mw)
+		{
+			/* Adjust sash to fit ToolPanel minimum size. */
+			
+			int adj_width = vtp_mw - vtp_cw;
+			v_splitter->SetSashPosition(v_splitter->GetSashPosition() - adj_width);
+		}
+		else if(vtp_Mw > 0 && vtp_cw > vtp_Mw)
+		{
+			/* Adjust sash to fit ToolPanel maximum size. */
+			
+			int adj_width = vtp_Mw - vtp_cw;
+			v_splitter->SetSashPosition(v_splitter->GetSashPosition() - adj_width);
+		}
 	}
+	
+	vtools_adjust_force = false;
+	vtools_initial_size = -1;
 }
 
-void REHex::Tab::htools_adjust()
+void REHex::Tab::htools_adjust(bool force_resize)
 {
+	if(htools_adjust_pending)
+	{
+		htools_adjust_on_idle(force_resize);
+		return;
+	}
+	
 	wxWindow *ht_current_page = h_tools->GetCurrentPage();
 	
 	if(ht_current_page == NULL || !ht_current_page->IsShown())
@@ -1142,17 +1299,48 @@ void REHex::Tab::htools_adjust()
 		if(!h_splitter->IsSplit())
 		{
 			h_splitter->SplitHorizontally(doc_ctrl, h_tools);
+			
+			htools_adjust_on_idle(true);
+			return;
 		}
 		
 		int htp_bh = std::max(ht_current_page->GetBestSize().GetHeight(), 0);
+		int htp_mh = ht_current_page->GetMinSize().GetHeight();
+		int htp_Mh = ht_current_page->GetMaxSize().GetHeight();
 		
-		/* Size overhead added by h_tools wxNotebook. */
-		int extra_h = h_tools->GetSize().GetHeight() - ht_current_page->GetSize().GetHeight();
+		int htp_ch = ht_current_page->GetSize().GetHeight();
 		
-		/* Set the sash position to display the tool page's best size. */
-		int hs_ch = h_splitter->GetClientSize().GetHeight();
-		h_splitter->SetSashPosition(hs_ch - (htp_bh + extra_h + h_splitter->GetSashSize()));
+		if(htools_initial_size > 0)
+		{
+			/* Adjust sash to fit saved ToolPanel size. */
+			
+			int adj_height = htools_initial_size - htp_ch;
+			h_splitter->SetSashPosition(h_splitter->GetSashPosition() - adj_height);
+		}
+		else if(force_resize)
+		{
+			/* Adjust sash to fit ToolPanel best size. */
+			
+			int adj_height = htp_bh - htp_ch;
+			h_splitter->SetSashPosition(h_splitter->GetSashPosition() - adj_height);
+		}
+		else if(htp_mh > 0 && htp_ch < htp_mh)
+		{
+			/* Adjust sash to fit ToolPanel minimum size. */
+			
+			int adj_height = htp_mh - htp_ch;
+			h_splitter->SetSashPosition(h_splitter->GetSashPosition() - adj_height);
+		}
+		else if(htp_Mh > 0 && htp_ch > htp_Mh)
+		{
+			/* Adjust sash to fit ToolPanel maximum size. */
+			
+			int adj_height = htp_Mh - htp_ch;
+			h_splitter->SetSashPosition(h_splitter->GetSashPosition() - adj_height);
+		}
 	}
+	
+	htools_initial_size = -1;
 }
 
 /* The size of a wxNotebook page doesn't seem to be set correctly during
@@ -1162,9 +1350,18 @@ void REHex::Tab::htools_adjust()
  * point the sizes seem to have been set up properly (on GTK anyway).
 */
 
-void REHex::Tab::vtools_adjust_on_idle()
+void REHex::Tab::vtools_adjust_on_idle(bool force_resize)
 {
-	Bind(wxEVT_IDLE, &REHex::Tab::vtools_adjust_now_idle, this);
+	if(force_resize)
+	{
+		vtools_adjust_force = true;
+	}
+	
+	if(!vtools_adjust_pending)
+	{
+		Bind(wxEVT_IDLE, &REHex::Tab::vtools_adjust_now_idle, this);
+		vtools_adjust_pending = true;
+	}
 }
 
 void REHex::Tab::vtools_adjust_now_idle(wxIdleEvent &event)
@@ -1172,12 +1369,26 @@ void REHex::Tab::vtools_adjust_now_idle(wxIdleEvent &event)
 	Unbind(wxEVT_IDLE, &REHex::Tab::vtools_adjust_now_idle, this);
 	event.Skip();
 	
-	vtools_adjust();
+	bool force_resize = vtools_adjust_force;
+	
+	vtools_adjust_pending = false;
+	vtools_adjust_force = false;
+	
+	vtools_adjust(force_resize);
 }
 
-void REHex::Tab::htools_adjust_on_idle()
+void REHex::Tab::htools_adjust_on_idle(bool force_resize)
 {
-	Bind(wxEVT_IDLE, &REHex::Tab::htools_adjust_now_idle, this);
+	if(force_resize)
+	{
+		htools_adjust_force = true;
+	}
+	
+	if(!htools_adjust_pending)
+	{
+		Bind(wxEVT_IDLE, &REHex::Tab::htools_adjust_now_idle, this);
+		htools_adjust_pending = true;
+	}
 }
 
 void REHex::Tab::htools_adjust_now_idle(wxIdleEvent &event)
@@ -1185,7 +1396,12 @@ void REHex::Tab::htools_adjust_now_idle(wxIdleEvent &event)
 	Unbind(wxEVT_IDLE, &REHex::Tab::htools_adjust_now_idle, this);
 	event.Skip();
 	
-	htools_adjust();
+	bool force_resize = htools_adjust_force;
+	
+	htools_adjust_pending = false;
+	htools_adjust_force = false;
+	
+	htools_adjust(force_resize);
 }
 
 /* wxEVT_NOTEBOOK_PAGE_CHANGED events aren't generated consistently between platforms and versions
@@ -1239,7 +1455,33 @@ void REHex::Tab::init_default_tools()
 {
 	wxConfig *config = wxGetApp().config;
 	
-	/* TODO: Load h_tools state. */
+	htools_initial_size = config->ReadLong("/default-view/htools/height", -1);
+	vtools_initial_size = config->ReadLong("/default-view/vtools/width", -1);
+	
+	for(unsigned int i = 0;; ++i)
+	{
+		char base_p[64];
+		snprintf(base_p, sizeof(base_p), "/default-view/htools/panels/0/tab/%u/", i);
+		
+		if(config->HasGroup(base_p))
+		{
+			config->SetPath(base_p);
+			
+			std::string name = config->Read    ("name", "").ToStdString();
+			bool selected    = config->ReadBool("selected", false);
+			
+			if(ToolPanelRegistry::by_name(name) != NULL)
+			{
+				tool_create(name, selected, config);
+			}
+			else{
+				/* TODO: Some kind of warning? */
+			}
+		}
+		else{
+			break;
+		}
+	}
 	
 	for(unsigned int i = 0;; ++i)
 	{
@@ -1255,7 +1497,7 @@ void REHex::Tab::init_default_tools()
 			
 			if(ToolPanelRegistry::by_name(name) != NULL)
 			{
-				tool_create(name, selected, config, false);
+				tool_create(name, selected, config);
 			}
 			else{
 				/* TODO: Some kind of warning? */
@@ -1269,11 +1511,63 @@ void REHex::Tab::init_default_tools()
 
 void REHex::Tab::repopulate_regions()
 {
-	std::vector<DocumentCtrl::Region*> regions = compute_regions(doc, inline_comment_mode);
+	std::vector<DocumentCtrl::Region*> regions;
+	
+	if(document_display_mode == DDM_VIRTUAL)
+	{
+		/* Virtual segments view. */
+		
+		const ByteRangeMap<off_t> &virt_to_real_segs = doc->get_virt_to_real_segs();
+		
+		if(virt_to_real_segs.empty())
+		{
+			static const wxString C_TEXT = "No virtual sections defined, displaying file data instead.";
+			regions.push_back(new DocumentCtrl::CommentRegion(-1, 0, C_TEXT, false, -1, 0));
+			
+			goto DO_FILE_VIEW;
+		}
+		else{
+			for(auto i = virt_to_real_segs.begin(); i != virt_to_real_segs.end(); ++i)
+			{
+				off_t real_offset_base = i->second;
+				off_t virt_offset_base = i->first.offset;
+				off_t length = i->first.length;
+				
+				std::vector<DocumentCtrl::Region*> v_regions = compute_regions(doc, real_offset_base, virt_offset_base, length, inline_comment_mode);
+				regions.insert(regions.end(), v_regions.begin(), v_regions.end());
+			}
+		}
+	}
+	else{
+		/* File view. */
+		DO_FILE_VIEW:
+		
+		std::vector<DocumentCtrl::Region*> file_regions = compute_regions(doc, 0, 0, doc->buffer_length(), inline_comment_mode);
+		
+		if(file_regions.empty())
+		{
+			assert(doc->buffer_length() == 0);
+			
+			/* Empty buffers need a data region too! */
+			file_regions.push_back(new DocumentCtrl::DataRegionDocHighlight(0, 0, 0, *doc));
+		}
+		else if(dynamic_cast<DocumentCtrl::DataRegionDocHighlight*>(file_regions.back()) == NULL)
+		{
+			/* End region isn't a DataRegionDocHighlight - means its a comment or a custom
+			 * data region type. Push one on the end so there's somewhere to put the cursor to
+			 * insert more data at the end.
+			*/
+			
+			file_regions.push_back(new DocumentCtrl::DataRegionDocHighlight(doc->buffer_length(), 0, doc->buffer_length(), *doc));
+		}
+		
+		regions.insert(regions.end(), file_regions.begin(), file_regions.end());
+	}
+	
 	doc_ctrl->replace_all_regions(regions);
 }
 
-std::vector<REHex::DocumentCtrl::Region*> REHex::Tab::compute_regions(SharedDocumentPointer doc, InlineCommentMode inline_comment_mode)
+std::vector<REHex::DocumentCtrl::Region*> REHex::Tab::compute_regions(SharedDocumentPointer doc, off_t real_offset_base, off_t virt_offset_base, off_t length, InlineCommentMode inline_comment_mode)
 {
 	auto comments = doc->get_comments();
 	auto types = doc->get_data_types();
@@ -1285,7 +1579,11 @@ std::vector<REHex::DocumentCtrl::Region*> REHex::Tab::compute_regions(SharedDocu
 	
 	auto offset_base = comments.begin();
 	auto types_iter = types.begin();
-	off_t next_data = 0, remain_data = doc->buffer_length();
+	off_t next_data = real_offset_base, next_virt = virt_offset_base, remain_data = length;
+	
+	/* Skip over comments/types prior to real_offset_base. */
+	while(offset_base != comments.end() && offset_base->first.offset < next_data) { ++offset_base; }
+	while(types_iter != types.end() && (types_iter->first.offset + types_iter->first.length <= next_data)) { ++types_iter; }
 	
 	if(inline_comment_mode == ICM_HIDDEN)
 	{
@@ -1298,6 +1596,7 @@ std::vector<REHex::DocumentCtrl::Region*> REHex::Tab::compute_regions(SharedDocu
 	
 	while(remain_data > 0)
 	{
+		assert((next_data + remain_data) <= doc->buffer_length());
 		assert(offset_base == comments.end() || offset_base->first.offset >= next_data);
 		
 		while(!dr_limit.empty() && dr_limit.top() <= next_data)
@@ -1324,7 +1623,20 @@ std::vector<REHex::DocumentCtrl::Region*> REHex::Tab::compute_regions(SharedDocu
 			do {
 				--c;
 				
-				regions.push_back(new DocumentCtrl::CommentRegion(c->first.offset, c->first.length, *(c->second.text), nest, truncate));
+				assert(c->first.offset == next_data);
+				
+				off_t indent_offset = next_virt;
+				off_t indent_length = nest
+					? std::min(c->first.length, remain_data)
+					: 0;
+				
+				regions.push_back(new DocumentCtrl::CommentRegion(
+					c->first.offset,
+					c->first.length,
+					*(c->second.text),
+					truncate,
+					indent_offset,
+					indent_length));
 				
 				if(nest && c->first.length > 0)
 				{
@@ -1366,36 +1678,20 @@ std::vector<REHex::DocumentCtrl::Region*> REHex::Tab::compute_regions(SharedDocu
 				dr_length = dtr->fixed_size;
 			}
 			
-			regions.push_back(dtr->region_factory(doc, next_data, dr_length));
+			regions.push_back(dtr->region_factory(doc, next_data, dr_length, next_virt));
 		}
 		else{
-			regions.push_back(new DocumentCtrl::DataRegionDocHighlight(next_data, dr_length, *doc));
+			regions.push_back(new DocumentCtrl::DataRegionDocHighlight(next_data, dr_length, next_virt, *doc));
 		}
 		
 		next_data   += dr_length;
+		next_virt   += dr_length;
 		remain_data -= dr_length;
 		
 		if(next_data >= (types_iter->first.offset + types_iter->first.length))
 		{
 			++types_iter;
 		}
-	}
-	
-	if(regions.empty())
-	{
-		assert(doc->buffer_length() == 0);
-		
-		/* Empty buffers need a data region too! */
-		regions.push_back(new DocumentCtrl::DataRegionDocHighlight(0, 0, *doc));
-	}
-	else if(dynamic_cast<DocumentCtrl::DataRegionDocHighlight*>(regions.back()) == NULL)
-	{
-		/* End region isn't a DataRegionDocHighlight - means its a comment or a custom
-		 * data region type. Push one on the end so there's somewhere to put the cursor to
-		 * insert more data at the end.
-		*/
-		
-		regions.push_back(new DocumentCtrl::DataRegionDocHighlight(doc->buffer_length(), 0, *doc));
 	}
 	
 	return regions;
