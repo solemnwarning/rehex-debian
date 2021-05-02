@@ -20,12 +20,13 @@
 #include <wx/app.h>
 #include <wx/init.h>
 
+#include "../src/App.hpp"
 #include "../src/ArtProvider.hpp"
 #include "../src/Palette.hpp"
 
-wxApp &wxGetApp()
+REHex::App &wxGetApp()
 {
-       return *wxTheApp;
+	return *(REHex::App*)(wxTheApp);
 }
 
 struct Cleanup
@@ -33,20 +34,39 @@ struct Cleanup
 	~Cleanup()
 	{
 		delete REHex::active_palette;
+		delete wxGetApp().recent_files;
+		delete wxGetApp().config;
+		delete wxGetApp().console;
 	}
 };
 
 int main(int argc, char **argv)
 {
-	wxApp::SetInstance(new wxApp());
+	REHex::App *app = new REHex::App();
+	
+	wxApp::SetInstance(app);
 	wxInitializer wxinit;
+	
+	app->console = new REHex::ConsoleBuffer();
+	app->config = new wxConfig("REHex-qwertyuiop"); /* Should be a name that won't load anything. */
+	app->recent_files = new wxFileHistory();
 	
 	wxImage::AddHandler(new wxPNGHandler);
 	REHex::ArtProvider::init();
 	
 	REHex::active_palette = REHex::Palette::create_system_palette();
 	Cleanup cleanup;
-
+	
 	testing::InitGoogleTest(&argc, argv);
 	return RUN_ALL_TESTS();
+}
+
+bool REHex::App::OnInit()
+{
+	return true;
+}
+
+int REHex::App::OnExit()
+{
+	return 0;
 }

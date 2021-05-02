@@ -1,5 +1,5 @@
 /* Reverse Engineer's Hex Editor
- * Copyright (C) 2020 Daniel Collins <solemnwarning@solemnwarning.net>
+ * Copyright (C) 2020-2021 Daniel Collins <solemnwarning@solemnwarning.net>
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 as published by
@@ -18,8 +18,10 @@
 #ifndef REHEX_DATATYPE_HPP
 #define REHEX_DATATYPE_HPP
 
+#include <functional>
 #include <map>
 #include <string>
+#include <vector>
 
 #include "document.hpp"
 #include "DocumentCtrl.hpp"
@@ -34,6 +36,8 @@ namespace REHex
 			static std::map<std::string, const DataTypeRegistration*>::const_iterator end();
 			
 			static const DataTypeRegistration *by_name(const std::string &name);
+			
+			static std::vector<const DataTypeRegistration*> sorted_by_group();
 			
 		private:
 			/* The registrations map is created by the first DataTypeRegistration and
@@ -53,16 +57,17 @@ namespace REHex
 	class DataTypeRegistration
 	{
 		public:
-			typedef DocumentCtrl::Region* (*RegionFactoryFunction)(SharedDocumentPointer &document, off_t offset, off_t length);
+			typedef std::function<DocumentCtrl::Region*(SharedDocumentPointer &document, off_t offset, off_t length, off_t virt_offset)> RegionFactoryFunction;
 			
 			std::string name;
 			std::string label;
 			
 			RegionFactoryFunction region_factory;
 			
+			std::string group;
 			off_t fixed_size;
 			
-			DataTypeRegistration(const std::string &name, const std::string &label, RegionFactoryFunction region_factory, off_t fixed_size = -1);
+			DataTypeRegistration(const std::string &name, const std::string &label, RegionFactoryFunction region_factory, const std::string &group = "", off_t fixed_size = -1);
 			~DataTypeRegistration();
 			
 			DataTypeRegistration(const DataTypeRegistration &src) = delete;
