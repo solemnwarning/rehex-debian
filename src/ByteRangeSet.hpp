@@ -26,11 +26,11 @@
 namespace REHex
 {
 	/**
-	 * @brief Wrapper around std::set for storing ranges in a file.
+	 * @brief Stores ranges of bytes and provides set operations.
 	 *
-	 * This class is a wrapper around std::set that can be used for storing ranges. Any ranges
-	 * which are adjacent or overlapping will be merged to reduce memory consumption, so only
-	 * each unique contiguous range added will take space in memory.
+	 * This class is a wrapper around std::vector that can be used for efficiently storing
+	 * ranges. Any ranges which are adjacent or overlapping will be merged to reduce memory
+	 * consumption, so only each unique contiguous range added will take space in memory.
 	*/
 	class ByteRangeSet
 	{
@@ -134,12 +134,12 @@ namespace REHex
 			void clear_all();
 			
 			/**
-			 * @brief Check if a byte is set in the set.
+			 * @brief Check if a range is set in the set.
 			*/
-			bool isset(off_t offset) const;
+			bool isset(off_t offset, off_t length = 1) const;
 			
 			/**
-			 * @brief Get a reference to the internal std::set.
+			 * @brief Get a reference to the internal std::vector.
 			*/
 			const std::vector<Range> &get_ranges() const;
 			
@@ -278,7 +278,7 @@ template<typename T> void REHex::ByteRangeSet::set_ranges(const T begin, const T
 			 * Not 100% sure which version actually fixed it.
 			*/
 			
-			#if defined(__GNUC__) && (__GNUC__ < 4 || (__GNUC__ == 4 && __GNUC_MINOR__ < 9))
+			#if !defined(__clang__) && defined(__GNUC__) && (__GNUC__ < 4 || (__GNUC__ == 4 && __GNUC_MINOR__ < 9))
 			for(auto i = group_ranges.begin(); i != group_ranges.end(); ++i)
 			{
 				next = ranges.insert(next, *i);
@@ -381,7 +381,7 @@ template<typename T> void REHex::ByteRangeSet::clear_ranges(const T begin, const
 				 * Not 100% sure which version actually fixed it.
 				*/
 				
-				#if defined(__GNUC__) && (__GNUC__ < 4 || (__GNUC__ == 4 && __GNUC_MINOR__ < 9))
+				#if !defined(__clang__) && defined(__GNUC__) && (__GNUC__ < 4 || (__GNUC__ == 4 && __GNUC_MINOR__ < 9))
 				for(auto i = group_replacements.begin(); i != group_replacements.end(); ++i)
 				{
 					next = ranges.insert(next, *i);

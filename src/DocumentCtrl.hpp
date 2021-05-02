@@ -30,6 +30,7 @@
 
 #include "buffer.hpp"
 #include "document.hpp"
+#include "Events.hpp"
 #include "NestedOffsetLengthMap.hpp"
 #include "Palette.hpp"
 #include "SharedDocumentPointer.hpp"
@@ -68,6 +69,18 @@ namespace REHex {
 					
 					virtual ~Region();
 					
+					enum StateFlag
+					{
+						IDLE       = 0,
+						PROCESSING = (1 << 0),
+						
+						WIDTH_CHANGE  = (1 << 1),
+						HEIGHT_CHANGE = (1 << 2),
+						REDRAW        = (1 << 3),
+					};
+					
+					virtual unsigned int check();
+					
 				protected:
 					Region(off_t indent_offset, off_t indent_length);
 					
@@ -88,6 +101,57 @@ namespace REHex {
 					virtual wxCursor cursor_for_point(REHex::DocumentCtrl &doc, int x, int64_t y_lines, int y_px);
 					
 					void draw_container(REHex::DocumentCtrl &doc, wxDC &dc, int x, int64_t y);
+					void draw_full_height_line(DocumentCtrl *doc_ctrl, wxDC &dc, int x, int64_t y);
+					
+					struct Highlight
+					{
+						public:
+							const bool enable;
+							
+							const Palette::ColourIndex fg_colour_idx;
+							const Palette::ColourIndex bg_colour_idx;
+							const bool strong;
+							
+							Highlight(Palette::ColourIndex fg_colour_idx, Palette::ColourIndex bg_colour_idx, bool strong):
+								enable(true),
+								fg_colour_idx(fg_colour_idx),
+								bg_colour_idx(bg_colour_idx),
+								strong(strong) {}
+						
+						protected:
+							Highlight():
+								enable(false),
+								fg_colour_idx(Palette::PAL_INVALID),
+								bg_colour_idx(Palette::PAL_INVALID),
+								strong(false) {}
+					};
+					
+					struct NoHighlight: Highlight
+					{
+						NoHighlight(): Highlight() {}
+					};
+					
+					static void draw_hex_line(DocumentCtrl *doc_ctrl, wxDC &dc, int x, int y, const unsigned char *data, size_t data_len, unsigned int pad_bytes, off_t base_off, bool alternate_row, const std::function<Highlight(off_t)> &highlight_at_off);
+					static void draw_ascii_line(DocumentCtrl *doc_ctrl, wxDC &dc, int x, int y, const unsigned char *data, size_t data_len, unsigned int pad_bytes, off_t base_off, bool alternate_row, const std::function<Highlight(off_t)> &highlight_at_off);
+					
+					/**
+					 * @brief Calculate offset of byte at X co-ordinate.
+					 *
+					 * Calculates the offset of the byte at the given X
+					 * co-ordinate in a line drawn with draw_hex_line(). Returns
+					 * -1 if the co-ordinate is negative or falls between byte
+					 * groups.
+					*/
+					static int offset_at_x_hex(DocumentCtrl *doc_ctrl, int rel_x);
+					
+					/**
+					 * @brief Calculate offset of byte near X co-ordinate.
+					 *
+					 * Calculates the offset of the byte nearest the given X
+					 * co-ordinate in a line drawn with draw_hex_line(). Returns
+					 * -1 if the co-ordinate is negative.
+					*/
+					static int offset_near_x_hex(DocumentCtrl *doc_ctrl, int rel_x);
 					
 				friend DocumentCtrl;
 			};
@@ -95,7 +159,7 @@ namespace REHex {
 			class GenericDataRegion: public Region
 			{
 				protected:
-					GenericDataRegion(off_t d_offset, off_t d_length);
+					GenericDataRegion(off_t d_offset, off_t d_length, off_t indent_offset);
 					
 				public:
 					const off_t d_offset;
@@ -106,10 +170,10 @@ namespace REHex {
 					*/
 					enum ScreenArea
 					{
-						SA_NONE,     /**< No/Unknown area. */
-						SA_HEX,      /**< The hex (data) view. */
-						SA_ASCII,    /**< The ASCII (text) view. */
-						SA_SPECIAL,  /**< Region-specific data area. */
+						SA_NONE    = 0,  /**< No/Unknown area. */
+						SA_HEX     = 1,  /**< The hex (data) view. */
+						SA_ASCII   = 2,  /**< The ASCII (text) view. */
+						SA_SPECIAL = 4,  /**< Region-specific data area. */
 					};
 					
 					/**
@@ -185,6 +249,12 @@ namespace REHex {
 					virtual Rect calc_offset_bounds(off_t offset, DocumentCtrl *doc_ctrl) = 0;
 					
 					/**
+					 * @brief Find which screen areas exist for the cursor to occupy at the given offset.
+					 * @return SA_XXX constants bitwise OR'd together.
+					*/
+					virtual ScreenArea screen_areas_at_offset(off_t offset, DocumentCtrl *doc_ctrl) = 0;
+					
+					/**
 					 * @brief Process key presses while the cursor is in this region.
 					 * @return true if the event was handled, false otherwise.
 					 *
@@ -241,36 +311,9 @@ namespace REHex {
 			
 			class DataRegion: public GenericDataRegion
 			{
-				public:
-					struct Highlight
-					{
-						public:
-							const bool enable;
-							
-							const Palette::ColourIndex fg_colour_idx;
-							const Palette::ColourIndex bg_colour_idx;
-							const bool strong;
-							
-							Highlight(Palette::ColourIndex fg_colour_idx, Palette::ColourIndex bg_colour_idx, bool strong):
-								enable(true),
-								fg_colour_idx(fg_colour_idx),
-								bg_colour_idx(bg_colour_idx),
-								strong(strong) {}
-						
-						protected:
-							Highlight():
-								enable(false),
-								fg_colour_idx(Palette::PAL_INVALID),
-								bg_colour_idx(Palette::PAL_INVALID),
-								strong(false) {}
-					};
-					
-					struct NoHighlight: Highlight
-					{
-						NoHighlight(): Highlight() {}
-					};
-					
 				protected:
+					off_t virt_offset;
+					
 					int offset_text_x;  /* Virtual X coord of left edge of offsets. */
 					int hex_text_x;     /* Virtual X coord of left edge of hex data. */
 					int ascii_text_x;   /* Virtual X coord of left edge of ASCII data. */
@@ -279,7 +322,7 @@ namespace REHex {
 					unsigned int first_line_pad_bytes;   /* Number of bytes to pad first line with. */
 					
 				public:
-					DataRegion(off_t d_offset, off_t d_length);
+					DataRegion(off_t d_offset, off_t d_length, off_t virt_offset);
 					
 					int calc_width_for_bytes(DocumentCtrl &doc_ctrl, unsigned int line_bytes) const;
 					
@@ -311,6 +354,7 @@ namespace REHex {
 					virtual off_t nth_row_nearest_column(int64_t row, int column) override;
 					
 					virtual Rect calc_offset_bounds(off_t offset, DocumentCtrl *doc_ctrl) override;
+					virtual ScreenArea screen_areas_at_offset(off_t offset, DocumentCtrl *doc_ctrl) override;
 					
 					virtual Highlight highlight_at_off(off_t off) const;
 					
@@ -323,7 +367,7 @@ namespace REHex {
 					Document &doc;
 					
 				public:
-					DataRegionDocHighlight(off_t d_offset, off_t d_length, Document &doc);
+					DataRegionDocHighlight(off_t d_offset, off_t d_length, off_t virt_offset, Document &doc);
 					
 				protected:
 					virtual Highlight highlight_at_off(off_t off) const override;
@@ -342,7 +386,7 @@ namespace REHex {
 				virtual void draw(REHex::DocumentCtrl &doc, wxDC &dc, int x, int64_t y) override;
 				virtual wxCursor cursor_for_point(REHex::DocumentCtrl &doc, int x, int64_t y_lines, int y_px) override;
 				
-				CommentRegion(off_t c_offset, off_t c_length, const wxString &c_text, bool nest_children, bool truncate);
+				CommentRegion(off_t c_offset, off_t c_length, const wxString &c_text, bool truncate, off_t indent_offset, off_t indent_length);
 				
 				friend DocumentCtrl;
 			};
@@ -375,6 +419,10 @@ namespace REHex {
 			
 			off_t get_cursor_position() const;
 			Document::CursorState get_cursor_state() const;
+			
+			bool hex_view_active() const;
+			bool ascii_view_active() const;
+			bool special_view_active() const;
 			
 			void set_cursor_position(off_t position, Document::CursorState cursor_state = Document::CSTATE_GOTO);
 			
@@ -420,6 +468,8 @@ namespace REHex {
 			void OnMotionTick(int mouse_x, int mouse_y);
 			void OnRedrawCursor(wxTimerEvent &event);
 			void OnClearHighlight(wxCommandEvent &event);
+			void OnIdle(wxIdleEvent &event);
+			void OnFontSizeAdjustmentChanged(FontSizeAdjustmentEvent &event);
 			
 		#ifndef UNIT_TEST
 		private:
@@ -431,6 +481,10 @@ namespace REHex {
 			
 			std::vector<Region*> regions;                  /**< List of regions to be displayed. */
 			std::vector<GenericDataRegion*> data_regions;  /**< Subset of regions which are a GenericDataRegion. */
+			std::vector<Region*> processing_regions;       /**< Subset of regions which are doing background processing. */
+			
+			/** List of iterators into data_regions, sorted by d_offset. */
+			std::vector< std::vector<GenericDataRegion*>::iterator > data_regions_sorted;
 			
 			/* Fixed-width font used for drawing hex data. */
 			wxFont hex_font;
