@@ -1,3 +1,9 @@
+rehex (0.3.91-0~ubuntu2104) hirsute; urgency=low
+
+  * Fix loading of plugins bundled as part of an AppImage.
+
+ -- Daniel Collins <solemnwarning@solemnwarning.net>  Mon, 03 May 2021 14:06:29 +0100
+
 rehex (0.3.90-0~ubuntu2104) hirsute; urgency=low
 
   * Show disassembly of machine code in the main document view (#94).
