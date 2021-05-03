@@ -5,6 +5,7 @@ CHANGES.txt
 LICENSE.txt
 MANIFEST
 Makefile
+Makefile.AppImage
 Makefile.osx
 Makefile.win
 README.OSX.md
