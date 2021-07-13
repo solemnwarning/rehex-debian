@@ -1,4 +1,4 @@
-rehex (0.3.91-0~debian10) buster; urgency=low
+rehex (0.3.91-0~debian11) UNRELEASED; urgency=low
 
   * Fix loading of plugins bundled as part of an AppImage.
 

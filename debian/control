@@ -6,7 +6,7 @@ Build-Depends:
  debhelper (>= 9),
  libjansson-dev,
  liblua5.3-dev,
- libwxgtk3.0-dev,
+ libwxgtk3.0-gtk3-dev,
  lua5.3,
  pkg-config,
  xauth,
@@ -22,9 +22,9 @@ Architecture: any
 Depends:
  ${shlibs:Depends},
  ${misc:Depends},
- libcapstone3,
+ libcapstone4,
  libjansson4,
  liblua5.3-0,
- libwxgtk3.0-0v5,
+ libwxgtk3.0-gtk3-0v5,
  zlib1g
 Description: Reverse Engineers' Hex Editor
