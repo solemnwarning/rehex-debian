@@ -214,6 +214,7 @@ tests/LuaPluginLoader.cpp
 tests/NestedOffsetLengthMap.cpp
 tests/NumericTextCtrl.cpp
 tests/SafeWindowPointer.cpp
+tests/SearchBase.cpp
 tests/SearchValue.cpp
 tests/SharedDocumentPointer.cpp
 tests/SizeTestPanel.cpp
