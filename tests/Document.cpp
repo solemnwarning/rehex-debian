@@ -1,5 +1,5 @@
 /* Reverse Engineer's Hex Editor
- * Copyright (C) 2020 Daniel Collins <solemnwarning@solemnwarning.net>
+ * Copyright (C) 2020-2021 Daniel Collins <solemnwarning@solemnwarning.net>
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 as published by
@@ -2630,4 +2630,349 @@ TEST_F(DocumentTest, InsertDataAfterMapping)
 		
 		EXPECT_EQ(doc->get_virt_to_real_segs().get_ranges(), EXPECT_V2R);
 	}
+}
+
+TEST_F(DocumentTest, UndoTransaction)
+{
+	/* Insert into empty document... */
+	
+	const char *DATA1 = "smoothorangemixed";
+	doc->insert_data(0, (const unsigned char*)(DATA1), strlen(DATA1), -1, Document::CSTATE_CURRENT, "initialise");
+	
+	ASSERT_DATA("smoothorangemixed");
+	
+	/* Start a transaction. */
+	doc->transact_begin("greet");
+	
+	events.clear();
+	
+	/* Insert at beginning of document. */
+	const char *DATA2 = "MAGIC";
+	doc->insert_data(0, (const unsigned char*)(DATA2), strlen(DATA2));
+	
+	/* Erase in middle of document. */
+	doc->erase_data(5, 6);
+	
+	/* Overwrite at end of document... */
+	const char *DATA3 = "RINGS";
+	doc->overwrite_data(11, (const unsigned char*)(DATA3), strlen(DATA3));
+	
+	/* Commit transaction. */
+	doc->transact_commit();
+	
+	{
+		const char *undo_desc = doc->undo_desc();
+		EXPECT_EQ(std::string(undo_desc ? undo_desc : "(null)"), "greet");
+	}
+	
+	EXPECT_EVENTS(
+		"DATA_INSERT(0, 5)",
+		"DATA_ERASE(5, 6)",
+		"DATA_OVERWRITE(11, 5)",
+	);
+	
+	ASSERT_DATA("MAGICorangeRINGS");
+	
+	/* Undo the transaction... */
+	
+	events.clear();
+	
+	doc->undo();
+	
+	{
+		const char *undo_desc = doc->undo_desc();
+		EXPECT_EQ(std::string(undo_desc ? undo_desc : "(null)"), "initialise");
+	}
+	
+	EXPECT_EVENTS(
+		"DATA_OVERWRITE(11, 5)",
+		"DATA_INSERT(5, 6)",
+		"DATA_ERASE(0, 5)",
+	);
+	
+	ASSERT_DATA("smoothorangemixed");
+	
+	/* Redo the overwrite... */
+	
+	events.clear();
+	
+	doc->redo();
+	
+	{
+		const char *undo_desc = doc->undo_desc();
+		EXPECT_EQ(std::string(undo_desc ? undo_desc : "(null)"), "greet");
+	}
+	
+	EXPECT_EVENTS(
+		"DATA_INSERT(0, 5)",
+		"DATA_ERASE(5, 6)",
+		"DATA_OVERWRITE(11, 5)",
+	);
+	
+	ASSERT_DATA("MAGICorangeRINGS");
+}
+
+TEST_F(DocumentTest, RollbackTransaction)
+{
+	/* Insert into empty document... */
+	
+	const char *DATA1 = "smoothorangemixed";
+	doc->insert_data(0, (const unsigned char*)(DATA1), strlen(DATA1), -1, Document::CSTATE_CURRENT, "initialise");
+	
+	ASSERT_DATA("smoothorangemixed");
+	
+	/* Start a transaction. */
+	doc->transact_begin("greet");
+	
+	events.clear();
+	
+	/* Insert at beginning of document. */
+	const char *DATA2 = "MAGIC";
+	doc->insert_data(0, (const unsigned char*)(DATA2), strlen(DATA2));
+	
+	/* Erase in middle of document. */
+	doc->erase_data(5, 6);
+	
+	/* Overwrite at end of document... */
+	const char *DATA3 = "RINGS";
+	doc->overwrite_data(11, (const unsigned char*)(DATA3), strlen(DATA3));
+	
+	{
+		const char *undo_desc = doc->undo_desc();
+		EXPECT_EQ(std::string(undo_desc ? undo_desc : "(null)"), "greet");
+	}
+	
+	EXPECT_EVENTS(
+		"DATA_INSERT(0, 5)",
+		"DATA_ERASE(5, 6)",
+		"DATA_OVERWRITE(11, 5)",
+	);
+	
+	ASSERT_DATA("MAGICorangeRINGS");
+	
+	/* Rollback transaction. */
+	
+	events.clear();
+	
+	doc->transact_rollback();
+	
+	{
+		const char *undo_desc = doc->undo_desc();
+		EXPECT_EQ(std::string(undo_desc ? undo_desc : "(null)"), "initialise");
+	}
+	
+	EXPECT_EVENTS(
+		"DATA_OVERWRITE(11, 5)",
+		"DATA_INSERT(5, 6)",
+		"DATA_ERASE(0, 5)",
+	);
+	
+	ASSERT_DATA("smoothorangemixed");
+	
+	/* Make sure you can't redo a rolled back transaction. */
+	
+	{
+		const char *redo_desc = doc->redo_desc();
+		EXPECT_EQ(std::string(redo_desc ? redo_desc : "(null)"), "(null)");
+	}
+}
+
+#define EXPECT_RANGE_DIRTY(offset, length, desc) \
+{ \
+	for(off_t i = offset; i < (offset + length); ++i) \
+	{ \
+		EXPECT_TRUE(doc->is_byte_dirty(i)) << desc << " (i = " << i << ")"; \
+	} \
+}
+
+#define EXPECT_RANGE_CLEAN(offset, length, desc) \
+{ \
+	for(off_t i = offset; i < (offset + length); ++i) \
+	{ \
+		EXPECT_FALSE(doc->is_byte_dirty(i)) << desc << " (i = " << i << ")"; \
+	} \
+}
+
+TEST_F(DocumentTest, DirtyState)
+{
+	EXPECT_TRUE(doc->is_dirty()) << "New Document is initially dirty";
+	
+	/* Insert into empty document... */
+	const char *DATA1 = "smoothorangemixed";
+	doc->insert_data(0, (const unsigned char*)(DATA1), strlen(DATA1), -1, Document::CSTATE_CURRENT, "initialise");
+	
+	/* Insert at beginning of document. */
+	const char *DATA2 = "MAGIC";
+	doc->insert_data(0, (const unsigned char*)(DATA2), strlen(DATA2));
+	
+	/* Erase in middle of document. */
+	doc->erase_data(5, 6);
+	
+	/* Overwrite at end of document... */
+	const char *DATA3 = "RINGS";
+	doc->overwrite_data(11, (const unsigned char*)(DATA3), strlen(DATA3));
+	
+	ASSERT_DATA("MAGICorangeRINGS");
+	
+	events.clear();
+	
+	EXPECT_TRUE(doc->is_dirty()) << "Document is dirty before saving";
+	EXPECT_RANGE_DIRTY(0, 16, "Document is dirty before saving");
+	
+	/* Save the file. */
+	char tmpfile[L_tmpnam];
+	tmpnam(tmpfile);
+	doc->save(tmpfile);
+	
+	EXPECT_EVENTS();
+	
+	EXPECT_FALSE(doc->is_dirty()) << "Document is clean after saving";
+	EXPECT_RANGE_CLEAN(0, 16, "Document is dirty before saving");
+	
+	/* Make some more changes. */
+	
+	/* Insert at end of document */
+	const char *DATA4 = "fixedflapbone";
+	doc->insert_data(16, (const unsigned char*)(DATA4), strlen(DATA4));
+	
+	/* Insert before last insertion. */
+	const char *DATA5 = "CABLE";
+	doc->insert_data(16, (const unsigned char*)(DATA5), strlen(DATA5));
+	
+	/* Erase "fixed". */
+	doc->erase_data(21, 5);
+	
+	/* Overwrite at start of document... */
+	const char *DATA6 = "STRIP";
+	doc->overwrite_data(0, (const unsigned char*)(DATA6), strlen(DATA6));
+	
+	ASSERT_DATA("STRIPorangeRINGSCABLEflapbone");
+	
+	EXPECT_TRUE(doc->is_dirty()) << "Document is dirty after making changes";
+	EXPECT_RANGE_DIRTY( 0,  5, "Modified range dirty after making changes");
+	EXPECT_RANGE_CLEAN( 5, 11, "Unmodified range clean after making changes");
+	EXPECT_RANGE_DIRTY(16, 13, "Modified range dirty after making changes");
+	
+	/* Undo everything but the first post-save insert. */
+	doc->undo();
+	doc->undo();
+	doc->undo();
+	
+	ASSERT_DATA("MAGICorangeRINGSfixedflapbone");
+	
+	EXPECT_TRUE(doc->is_dirty()) << "Document is dirty after undoing some changes";
+	EXPECT_RANGE_CLEAN( 0, 16, "Unmodified range clean after undoing changes");
+	EXPECT_RANGE_DIRTY(16, 13, "Modified range dirty after undoing changes");
+	
+	/* Undo remaining post-save change. */
+	doc->undo();
+	
+	ASSERT_DATA("MAGICorangeRINGS");
+	
+	EXPECT_FALSE(doc->is_dirty()) << "Document is clean after undoing all changes";
+	EXPECT_RANGE_CLEAN(0, 16, "Unmodified range clean after undoing changes");
+	
+	/* Redo it all... */
+	doc->redo();
+	doc->redo();
+	doc->redo();
+	doc->redo();
+	
+	ASSERT_DATA("STRIPorangeRINGSCABLEflapbone");
+	
+	EXPECT_TRUE(doc->is_dirty()) << "Document is dirty after redoing changes";
+	EXPECT_RANGE_DIRTY( 0,  5, "Modified range dirty after redoing changes");
+	EXPECT_RANGE_CLEAN( 5, 11, "Unmodified range clean after redoing changes");
+	EXPECT_RANGE_DIRTY(16, 13, "Modified range dirty after redoing changes");
+	
+	/* Re-undo it all... */
+	doc->undo();
+	doc->undo();
+	doc->undo();
+	doc->undo();
+	
+	ASSERT_DATA("MAGICorangeRINGS");
+	
+	EXPECT_FALSE(doc->is_dirty()) << "Document is clean after undoing all changes";
+	EXPECT_RANGE_CLEAN(0, 16, "Unmodified range clean after undoing changes");
+	
+	/* Undo changes prior to save... */
+	doc->undo();
+	
+	ASSERT_DATA("MAGICorangemixed");
+	
+	EXPECT_TRUE(doc->is_dirty()) << "Document is dirty after undoing change made prior to save";
+	EXPECT_RANGE_CLEAN( 0, 11, "Unmodified range clean after undoing change made prior to save");
+	EXPECT_RANGE_DIRTY(11,  5, "Modified range dirty after undoing change made prior to save");
+	
+	/* Undo some more... */
+	doc->undo();
+	doc->undo();
+	
+	ASSERT_DATA("smoothorangemixed");
+	
+	EXPECT_TRUE(doc->is_dirty()) << "Document is dirty after undoing changes made prior to save";
+	EXPECT_RANGE_DIRTY( 0,  6, "Modified range dirty after undoing changes made prior to save");
+	EXPECT_RANGE_CLEAN( 6,  6, "Unmodified range clean after undoing changes made prior to save");
+	EXPECT_RANGE_DIRTY(12,  5, "Modified range dirty after undoing changes made prior to save");
+	
+	/* Redo them until clean... */
+	doc->redo();
+	doc->redo();
+	doc->redo();
+	
+	ASSERT_DATA("MAGICorangeRINGS");
+	
+	EXPECT_FALSE(doc->is_dirty()) << "Document is clean after redoing all changes";
+	EXPECT_RANGE_CLEAN(0, 16, "Unmodified range clean after redoing all changes");
+	
+	/* Undo a couple again... */
+	doc->undo();
+	doc->undo();
+	
+	ASSERT_DATA("MAGICsmoothorangemixed");
+	
+	EXPECT_TRUE(doc->is_dirty()) << "Document is dirty after undoing changes made prior to save";
+	EXPECT_RANGE_CLEAN( 0,  5, "Unmodified range clean after undoing changes made prior to save");
+	EXPECT_RANGE_DIRTY( 5,  6, "Modified range dirty after undoing changes made prior to save");
+	EXPECT_RANGE_CLEAN(11,  6, "Unmodified range clean after undoing changes made prior to save");
+	EXPECT_RANGE_DIRTY(17,  5, "Modified range dirty after undoing changes made prior to save");
+	
+	/* Make NEW changes from here, making it impossible to return to a clean state. */
+	
+	const char *DATA7 = "follow";
+	doc->overwrite_data(11, (const unsigned char*)(DATA7), strlen(DATA7));
+	
+	const char *DATA8 = "farm";
+	doc->insert_data(22, (const unsigned char*)(DATA8), strlen(DATA8));
+	
+	ASSERT_DATA("MAGICsmoothfollowmixedfarm");
+	
+	EXPECT_TRUE(doc->is_dirty()) << "Document is dirty after undoing changes made prior to save and then making new changes";
+	EXPECT_RANGE_CLEAN( 0,  5, "Unmodified range clean after undoing changes made prior to save and then making new changes");
+	EXPECT_RANGE_DIRTY( 5, 21, "Modified range dirty after undoing changes made prior to save and then making new changes");
+	
+	/* Undo the new changes. */
+	
+	doc->undo();
+	doc->undo();
+	
+	ASSERT_DATA("MAGICsmoothorangemixed");
+	
+	EXPECT_TRUE(doc->is_dirty()) << "Document is dirty after undoing changes made prior to save";
+	EXPECT_RANGE_CLEAN( 0,  5, "Unmodified range clean after undoing changes made prior to save");
+	EXPECT_RANGE_DIRTY( 5,  6, "Modified range dirty after undoing changes made prior to save");
+	EXPECT_RANGE_CLEAN(11,  6, "Unmodified range clean after undoing changes made prior to save");
+	EXPECT_RANGE_DIRTY(17,  5, "Modified range dirty after undoing changes made prior to save");
+	
+	/* Redo the new changes. */
+	
+	doc->redo();
+	doc->redo();
+	
+	ASSERT_DATA("MAGICsmoothfollowmixedfarm");
+	
+	EXPECT_TRUE(doc->is_dirty()) << "Document is dirty after undoing changes made prior to save and then making new changes";
+	EXPECT_RANGE_CLEAN( 0,  5, "Unmodified range clean after undoing changes made prior to save and then making new changes");
+	EXPECT_RANGE_DIRTY( 5, 21, "Modified range dirty after undoing changes made prior to save and then making new changes");
 }
