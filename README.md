@@ -27,7 +27,28 @@ TODO
 
 ## Release process
 
-TODO
+From a clean rehex-debian checkout:
+
+```
+$ git remote add rehex https://github.com/solemnwarning/rehex.git
+$ git fetch rehex --tags
+```
+
+Then for each branch to be updated:
+
+```
+$ git checkout debian/buster
+
+$ git merge --no-ff -s recursive -X theirs 0.3.92
+
+$ dch -v 0.3.92-0~debian10 -D buster -u low
+$ git add debian/changelog
+$ git commit -m '[debian] Release 0.3.92'
+$ git push origin debian/buster
+
+$ gbp tag --ignore-branch
+$ git push origin debian/0.3.92-0_debian10
+```
 
 ## Building releases
 
