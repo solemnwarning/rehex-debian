@@ -21,6 +21,7 @@
 #include <algorithm>
 #include <assert.h>
 #include <atomic>
+#include <functional>
 #include <iterator>
 #include <mutex>
 #include <sys/types.h>
@@ -142,6 +143,35 @@ namespace REHex
 			void clear_range(off_t offset, off_t length);
 			
 			/**
+			 * @brief Get a subset of the ranges defined in the map.
+			 *
+			 * This method builds a ByteRangeMap containing any ranges intersecting the
+			 * given range, clamped to the ends of the range.
+			*/
+			ByteRangeMap<T> get_slice(off_t offset, off_t length) const;
+			
+			/**
+			 * @brief Set all keys defined in another ByteRangeMap.
+			 *
+			 * This method copies ranges from another ByteRangeMap, overwriting any
+			 * already set in this one.
+			*/
+			void set_slice(const ByteRangeMap<T> &slice);
+			
+			/**
+			 * @brief Transform all values defined in the map.
+			 *
+			 * This method transforms ALL values in the map through the given function.
+			 *
+			 * The existing map is modified and a reference to it is returned as a
+			 * convenience to allow for chaining.
+			 *
+			 * WARNING: The transform MUST NOT cause values that were previously equal
+			 * to become not-equal or vice-versa.
+			*/
+			ByteRangeMap<T> &transform(const std::function<T(const T &value)> &func);
+			
+			/**
 			 * @brief Get a reference to the internal std::vector.
 			*/
 			const std::vector< std::pair<Range, T> > &get_ranges() const
@@ -152,6 +182,8 @@ namespace REHex
 			const_iterator begin() const { return ranges.begin(); }
 			const_iterator end() const { return ranges.end(); }
 			bool empty() const { return ranges.empty(); }
+			const std::pair<Range, T> &front() const { assert(!ranges.empty()); return ranges.front(); }
+			const std::pair<Range, T> &back() const { assert(!ranges.empty()); return ranges.back(); }
 			
 			/**
 			 * @brief Adjust for data being inserted into file.
@@ -208,12 +240,13 @@ template<typename T> typename REHex::ByteRangeMap<T>::const_iterator REHex::Byte
 		--i;
 	}
 	
-	for(; i != ranges.end() && i->first.offset < (offset + length); ++i)
+	off_t end = offset + length;
+	
+	for(; i != ranges.end() && (i->first.offset < end || end < offset); ++i)
 	{
-		off_t end = offset + length;
 		off_t i_end = i->first.offset + i->first.length;
 		
-		if(i->first.offset < end && offset < i_end)
+		if((i->first.offset < end || end < offset) && offset < i_end)
 		{
 			return i;
 		}
@@ -416,6 +449,41 @@ template<typename T> void REHex::ByteRangeMap<T>::clear_range(off_t offset, off_
 		erase_end = ranges.insert(erase_end, insert_after.front());
 		++erase_end;
 	}
+}
+
+template<typename T> REHex::ByteRangeMap<T> REHex::ByteRangeMap<T>::get_slice(off_t offset, off_t length) const
+{
+	off_t end = offset + length;
+	
+	ByteRangeMap<T> slice;
+	
+	for(auto i = get_range_in(offset, length); i != this->end() && i->first.offset < end; ++i)
+	{
+		off_t slice_off = std::max(i->first.offset, offset);
+		off_t slice_len = std::min(i->first.length, (end - slice_off));
+		
+		slice.set_range(slice_off, slice_len, i->second);
+	}
+	
+	return slice;
+}
+
+template<typename T> void REHex::ByteRangeMap<T>::set_slice(const ByteRangeMap<T> &slice)
+{
+	for(auto i = slice.begin(); i != slice.end(); ++i)
+	{
+		set_range(i->first.offset, i->first.length, i->second);
+	}
+}
+
+template<typename T> REHex::ByteRangeMap<T> &REHex::ByteRangeMap<T>::transform(const std::function<T(const T &value)> &func)
+{
+	for(auto i = ranges.begin(); i != ranges.end(); ++i)
+	{
+		i->second = func(i->second);
+	}
+	
+	return *this;
 }
 
 template<typename T> bool REHex::ByteRangeMap<T>::data_inserted(off_t offset, off_t length)

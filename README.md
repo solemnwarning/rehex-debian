@@ -78,7 +78,7 @@ Finally, you can install the package:
 
 ## Building
 
-If you want to compile on Linux, just check out the source and run `make`. You will need Jansson, wxWidgets and capstone installed, along with their development packages (Install `build-essential`, `git`, `libwxgtk3.0-dev`, `libjansson-dev` and `libcapstone-dev` on Ubuntu).
+If you want to compile on Linux, just check out the source and run `make`. You will need Jansson, wxWidgets, Capstone and Lua installed, along with their development packages (Install `build-essential`, `git`, `libwxgtk3.0-dev`, `libjansson-dev`, `libcapstone-dev`, `liblua5.3-dev` and `lua5.3` on Ubuntu).
 
 The resulting build can be installed using `make install`, which accepts all the standard environment variables.
 
@@ -86,4 +86,4 @@ For Windows or Mac build instructions, see the relevant README: [README.Windows.
 
 ## Feedback
 
-If you find any bugs or have suggestions for improvements or new features, please open an issue on Github, or join the `#rehex` IRC channel on `irc.freenode.net`.
+If you find any bugs or have suggestions for improvements or new features, please open an issue on Github, or join the `#rehex` IRC channel on `irc.libera.chat`.

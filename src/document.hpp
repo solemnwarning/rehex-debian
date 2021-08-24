@@ -1,5 +1,5 @@
 /* Reverse Engineer's Hex Editor
- * Copyright (C) 2017-2020 Daniel Collins <solemnwarning@solemnwarning.net>
+ * Copyright (C) 2017-2021 Daniel Collins <solemnwarning@solemnwarning.net>
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 as published by
@@ -273,12 +273,24 @@ namespace REHex {
 		#ifndef UNIT_TEST
 		private:
 		#endif
-			struct TrackedChange
+			struct TransOpFunc
 			{
-				const char *desc;
+				const std::function<TransOpFunc()> func;
 				
-				std::function< void() > undo;
-				std::function< void() > redo;
+				TransOpFunc(const std::function<TransOpFunc()> &func);
+				TransOpFunc(const TransOpFunc &src);
+				TransOpFunc(TransOpFunc &&src);
+				
+				TransOpFunc operator()() const;
+			};
+			
+			struct Transaction
+			{
+				const std::string desc;
+				
+				bool complete;
+				
+				std::list<TransOpFunc> ops;
 				
 				off_t       old_cpos_off;
 				CursorState old_cursor_state;
@@ -289,17 +301,27 @@ namespace REHex {
 				ByteRangeMap<off_t> old_real_to_virt_segs;
 				ByteRangeMap<off_t> old_virt_to_real_segs;
 				
-				bool old_dirty;
-				ByteRangeSet old_dirty_bytes;
+				Transaction(const std::string &desc, Document *doc):
+					desc(desc),
+					complete(false),
+					
+					old_cpos_off(doc->get_cursor_position()),
+					old_cursor_state(doc->get_cursor_state()),
+					old_comments(doc->get_comments()),
+					old_highlights(doc->get_highlights()),
+					old_types(doc->get_data_types()),
+					old_real_to_virt_segs(doc->get_real_to_virt_segs()),
+					old_virt_to_real_segs(doc->get_virt_to_real_segs()) {}
 			};
+			
+			void transact_step(const TransOpFunc &op, const std::string &desc);
 			
 			Buffer *buffer;
 			std::string filename;
 			
-			bool dirty;
-			ByteRangeSet dirty_bytes;
-			
-			void set_dirty(bool dirty);
+			unsigned int current_seq;
+			ByteRangeMap<unsigned int> data_seq;
+			unsigned int saved_seq;
 			
 			NestedOffsetLengthMap<Comment> comments;
 			NestedOffsetLengthMap<int> highlights; /* TODO: Change this to a ByteRangeMap. */
@@ -316,24 +338,33 @@ namespace REHex {
 			enum CursorState cursor_state;
 			
 			static const int UNDO_MAX = 64;
-			std::list<REHex::Document::TrackedChange> undo_stack;
-			std::list<REHex::Document::TrackedChange> redo_stack;
+			std::list<Transaction> undo_stack;
+			std::list<Transaction> redo_stack;
 			
 			void _set_cursor_position(off_t position, enum CursorState cursor_state);
 			
-			void _UNTRACKED_overwrite_data(off_t offset, const unsigned char *data, off_t length);
+			void _UNTRACKED_overwrite_data(off_t offset, const unsigned char *data, off_t length, const ByteRangeMap<unsigned int> &data_seq_slice);
 			
-			void _UNTRACKED_insert_data(off_t offset, const unsigned char *data, off_t length);
+			void _UNTRACKED_insert_data(off_t offset, const unsigned char *data, off_t length, const ByteRangeMap<unsigned int> &data_seq_slice);
 			void _update_mappings_data_inserted(off_t offset, off_t length);
 			
 			void _UNTRACKED_erase_data(off_t offset, off_t length);
 			bool _virt_to_real_segs_data_erased(off_t offset, off_t length);
 			
-			void _tracked_overwrite_data(const char *change_desc, off_t offset, const unsigned char *data, off_t length, off_t new_cursor_pos, CursorState new_cursor_state);
-			void _tracked_insert_data(const char *change_desc, off_t offset, const unsigned char *data, off_t length, off_t new_cursor_pos, CursorState new_cursor_state);
-			void _tracked_erase_data(const char *change_desc, off_t offset, off_t length, off_t new_cursor_pos, CursorState new_cursor_state);
-			void _tracked_replace_data(const char *change_desc, off_t offset, off_t old_data_length, const unsigned char *new_data, off_t new_data_length, off_t new_cursor_pos, CursorState new_cursor_state);
-			void _tracked_change(const char *desc, std::function< void() > do_func, std::function< void() > undo_func);
+			TransOpFunc _op_overwrite_undo(off_t offset, std::shared_ptr< std::vector<unsigned char> > old_data, off_t new_cursor_pos, CursorState new_cursor_state);
+			TransOpFunc _op_overwrite_redo(off_t offset, std::shared_ptr< std::vector<unsigned char> > new_data, off_t new_cursor_pos, CursorState new_cursor_state);
+			
+			TransOpFunc _op_insert_undo(off_t offset, off_t length, off_t new_cursor_pos, CursorState new_cursor_state);
+			TransOpFunc _op_insert_redo(off_t offset, std::shared_ptr< std::vector<unsigned char> > data, off_t new_cursor_pos, CursorState new_cursor_state, const ByteRangeMap<unsigned int> &redo_data_seq_slice);
+			
+			TransOpFunc _op_erase_undo(off_t offset, std::shared_ptr< std::vector<unsigned char> > old_data, off_t new_cursor_pos, CursorState new_cursor_state, const ByteRangeMap<unsigned int> &undo_data_seq_slice);
+			TransOpFunc _op_erase_redo(off_t offset, off_t length, off_t new_cursor_pos, CursorState new_cursor_state);
+			
+			TransOpFunc _op_replace_undo(off_t offset, std::shared_ptr< std::vector<unsigned char> > old_data, off_t new_data_length, off_t new_cursor_pos, CursorState new_cursor_state, const ByteRangeMap<unsigned int> &undo_data_seq_slice);
+			TransOpFunc _op_replace_redo(off_t offset, off_t old_data_length, std::shared_ptr< std::vector<unsigned char> > new_data, off_t new_cursor_pos, CursorState new_cursor_state);
+			
+			void _tracked_change(const char *desc, const std::function< void() > &do_func, const std::function< void() > &undo_func);
+			TransOpFunc _op_tracked_change(const std::function< void() > &func, const std::function< void() > &next_func);
 			
 			json_t *_dump_metadata(bool& has_data);
 			void _save_metadata(const std::string &filename);
@@ -411,6 +442,10 @@ namespace REHex {
 			 * @param change_desc       Description of change for undo history.
 			*/
 			void replace_data(off_t offset, off_t old_data_length, const unsigned char *new_data, off_t new_data_length, off_t new_cursor_pos = -1, CursorState new_cursor_state = CSTATE_CURRENT, const char *change_desc = "change data");
+			
+			void transact_begin(const std::string &desc);
+			void transact_commit();
+			void transact_rollback();
 	};
 	
 	/**
@@ -461,6 +496,47 @@ namespace REHex {
 			 * @param base      Base offset to be subtracted from the offset of each comment.
 			*/
 			void set_comments(const std::list<NestedOffsetLengthMap<REHex::Document::Comment>::const_iterator> &comments, off_t base = 0);
+	};
+	
+	/**
+	 * @brief RAII-style Document transaction wrapper.
+	*/
+	class ScopedTransaction
+	{
+		private:
+			Document *doc;
+			bool committed;
+			
+		public:
+			/**
+			 * @brief Opens a new transaction.
+			*/
+			ScopedTransaction(Document *doc, const std::string &desc):
+				doc(doc),
+				committed(false)
+			{
+				doc->transact_begin(desc);
+			}
+			
+			/**
+			 * @brief Rolls back the transaction if not already committed.
+			*/
+			~ScopedTransaction()
+			{
+				if(!committed)
+				{
+					doc->transact_rollback();
+				}
+			}
+			
+			/**
+			 * @brief Complete the transaction.
+			*/
+			void commit()
+			{
+				doc->transact_commit();
+				committed = true;
+			}
 	};
 }
 
