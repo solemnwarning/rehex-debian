@@ -1,3 +1,30 @@
+rehex (0.3.92-0~ubuntu2104) hirsute; urgency=low
+
+  * Reduce persistent memory usage (#52).
+
+  * Fully undo virtual mapping changes in one step (#126).
+
+  * Fix build dependency errors (#129).
+
+  * Add "Find previous" button to search dialogs (#111).
+
+  * Fix hard-to-see colours in "Decode values" panel on some systems (#127).
+
+  * Fix build errors on FreeBSD (#133).
+
+  * Prevent document from jumping around when the window is resized or
+    disassembly is in progress (#132).
+
+  * Fix build errors when using wxWidgets 3.1.5 and newer.
+
+  * Refactor selection handling to make sense in virtual section view (#125).
+
+  * Add font face setting to "View" menu (#128).
+
+  * Correctly track whether files have been modified since saving (#122).
+
+ -- Daniel Collins <solemnwarning@solemnwarning.net>  Tue, 24 Aug 2021 22:50:23 +0100
+
 rehex (0.3.91-0~ubuntu2104) hirsute; urgency=low
 
   * Fix loading of plugins bundled as part of an AppImage.
