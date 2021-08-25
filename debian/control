@@ -22,7 +22,7 @@ Architecture: any
 Depends:
  ${shlibs:Depends},
  ${misc:Depends},
- libcapstone3,
+ libcapstone4,
  libjansson4,
  liblua5.3-0,
  libwxgtk3.0-gtk3-0v5,

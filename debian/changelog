@@ -1,3 +1,9 @@
+rehex (0.3.92-0~ubuntu2104+1) hirsute; urgency=low
+
+  * Fix broken runtime depedency (libcapstone3 -> libcapstone4).
+
+ -- Daniel Collins <solemnwarning@solemnwarning.net>  Wed, 25 Aug 2021 20:54:35 +0100
+
 rehex (0.3.92-0~ubuntu2104) hirsute; urgency=low
 
   * Reduce persistent memory usage (#52).
