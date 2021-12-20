@@ -32,6 +32,7 @@
 #include "ByteRangeSet.hpp"
 #include "document.hpp"
 #include "Events.hpp"
+#include "LRUCache.hpp"
 #include "NestedOffsetLengthMap.hpp"
 #include "Palette.hpp"
 #include "SharedDocumentPointer.hpp"
@@ -133,7 +134,7 @@ namespace REHex {
 					};
 					
 					static void draw_hex_line(DocumentCtrl *doc_ctrl, wxDC &dc, int x, int y, const unsigned char *data, size_t data_len, unsigned int pad_bytes, off_t base_off, bool alternate_row, const std::function<Highlight(off_t)> &highlight_at_off);
-					static void draw_ascii_line(DocumentCtrl *doc_ctrl, wxDC &dc, int x, int y, const unsigned char *data, size_t data_len, unsigned int pad_bytes, off_t base_off, bool alternate_row, const std::function<Highlight(off_t)> &highlight_at_off);
+					static void draw_ascii_line(DocumentCtrl *doc_ctrl, wxDC &dc, int x, int y, const unsigned char *data, size_t data_len, size_t data_extra_pre, size_t data_extra_post, off_t alignment_hint, unsigned int pad_bytes, off_t base_off, bool alternate_row, const std::function<Highlight(off_t)> &highlight_at_off);
 					
 					/**
 					 * @brief Calculate offset of byte at X co-ordinate.
@@ -427,6 +428,12 @@ namespace REHex {
 			
 			void set_cursor_position(off_t position, Document::CursorState cursor_state = Document::CSTATE_GOTO);
 			
+			bool has_prev_cursor_position() const;
+			void goto_prev_cursor_position();
+			
+			bool has_next_cursor_position() const;
+			void goto_next_cursor_position();
+			
 			bool get_insert_mode();
 			void set_insert_mode(bool enabled);
 			
@@ -539,7 +546,7 @@ namespace REHex {
 			/**
 			 * @brief Set the vertical scroll position, in lines.
 			*/
-			void set_scroll_yoff(int64_t scroll_yoff);
+			void set_scroll_yoff(int64_t scroll_yoff, bool update_linked_scroll_others = true);
 			
 			void OnPaint(wxPaintEvent &event);
 			void OnErase(wxEraseEvent& event);
@@ -615,6 +622,11 @@ namespace REHex {
 			off_t cpos_off{0};
 			bool insert_mode{false};
 			
+			static const size_t CPOS_HISTORY_LIMIT = 128;
+			
+			std::vector<off_t> cpos_prev;
+			std::vector<off_t> cpos_next;
+			
 			off_t selection_begin;
 			off_t selection_end;
 			
@@ -631,7 +643,7 @@ namespace REHex {
 			
 			Document::CursorState cursor_state;
 			
-			void _set_cursor_position(off_t position, Document::CursorState cursor_state);
+			void _set_cursor_position(off_t position, Document::CursorState cursor_state, bool preserve_cpos_hist = false);
 			
 			std::vector<GenericDataRegion*>::iterator _data_region_by_offset(off_t offset);
 			
@@ -701,10 +713,14 @@ namespace REHex {
 			static const int PRECOMP_HF_STRING_WIDTH_TO = 512;
 			unsigned int hf_string_width_precomp[PRECOMP_HF_STRING_WIDTH_TO];
 			
+			static const size_t GETTEXTEXTENT_CACHE_SIZE = 4096;
+			LRUCache<std::string, wxSize> hf_gte_cache;
+			
 		public:
 			static std::list<wxString> format_text(const wxString &text, unsigned int cols, unsigned int from_line = 0, unsigned int max_lines = -1);
 			int indent_width(int depth);
 			int get_offset_column_width();
+			int get_virtual_width();
 			bool get_cursor_visible();
 			
 			int hf_char_width();

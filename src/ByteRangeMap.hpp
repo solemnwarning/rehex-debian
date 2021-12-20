@@ -78,16 +78,32 @@ namespace REHex
 			
 			std::vector< std::pair<Range, T> > ranges;
 			
+			/* Last iterator returned by get_range(), used to avoid a lookup from
+			 * scratch when a nearby offset is requested again.
+			*/
+			mutable typename std::vector< std::pair<Range, T> >::const_iterator last_get_iter;
+			
 		public:
 			/**
 			 * @brief Construct an empty map.
 			*/
 			ByteRangeMap(const T &default_value = T()):
-				default_value(default_value) {}
+				default_value(default_value),
+				last_get_iter(ranges.end()) {}
 			
 			ByteRangeMap(const ByteRangeMap &src):
 				default_value(src.default_value),
-				ranges(src.ranges) {}
+				ranges(src.ranges),
+				last_get_iter(ranges.end()) {}
+			
+			ByteRangeMap &operator=(const ByteRangeMap &rhs)
+			{
+				default_value = rhs.default_value;
+				ranges = rhs.ranges;
+				last_get_iter = ranges.end();
+				
+				return *this;
+			}
 			
 			bool operator==(const ByteRangeMap<T> &rhs) const
 			{
@@ -107,7 +123,8 @@ namespace REHex
 			*/
 			template<typename I> ByteRangeMap(const I begin, const I end, const T &default_value = T()):
 				default_value(default_value),
-				ranges(begin, end) {}
+				ranges(begin, end),
+				last_get_iter(ranges.end()) {}
 			
 			/**
 			 * @brief Search the map for a range encompassing the given offset.
@@ -182,6 +199,7 @@ namespace REHex
 			const_iterator begin() const { return ranges.begin(); }
 			const_iterator end() const { return ranges.end(); }
 			bool empty() const { return ranges.empty(); }
+			size_t size() const { return ranges.size(); }
 			const std::pair<Range, T> &front() const { assert(!ranges.empty()); return ranges.front(); }
 			const std::pair<Range, T> &back() const { assert(!ranges.empty()); return ranges.back(); }
 			
@@ -211,6 +229,11 @@ namespace REHex
 
 template<typename T> typename REHex::ByteRangeMap<T>::const_iterator REHex::ByteRangeMap<T>::get_range(off_t offset) const
 {
+	if(last_get_iter != ranges.end() && last_get_iter->first.offset <= offset && (last_get_iter->first.offset + last_get_iter->first.length) > offset)
+	{
+		return last_get_iter;
+	}
+	
 	/* Starting from the first element after us (or the end of the vector)... */
 	auto i = std::lower_bound(ranges.begin(), ranges.end(), std::make_pair(Range((offset + 1), 0), default_value));
 	
@@ -223,6 +246,7 @@ template<typename T> typename REHex::ByteRangeMap<T>::const_iterator REHex::Byte
 		if(i->first.offset <= offset && (i->first.offset + i->first.length) > offset)
 		{
 			/* ...it does, return it. */
+			last_get_iter = i;
 			return i;
 		}
 	}
@@ -373,6 +397,8 @@ template<typename T> void REHex::ByteRangeMap<T>::set_range(off_t offset, off_t 
 		erase_end = ranges.insert(erase_end, insert_after.front());
 		++erase_end;
 	}
+	
+	last_get_iter = ranges.end();
 }
 
 template<typename T> void REHex::ByteRangeMap<T>::clear_range(off_t offset, off_t length)
@@ -449,6 +475,8 @@ template<typename T> void REHex::ByteRangeMap<T>::clear_range(off_t offset, off_
 		erase_end = ranges.insert(erase_end, insert_after.front());
 		++erase_end;
 	}
+	
+	last_get_iter = ranges.end();
 }
 
 template<typename T> REHex::ByteRangeMap<T> REHex::ByteRangeMap<T>::get_slice(off_t offset, off_t length) const
@@ -574,6 +602,8 @@ template<typename T> bool REHex::ByteRangeMap<T>::data_inserted(off_t offset, of
 		ranges.insert(std::next(ranges.begin(), insert_idx), insert_elem[0]);
 	}
 	
+	last_get_iter = ranges.end();
+	
 	return elements_changed;
 }
 
@@ -658,6 +688,8 @@ template<typename T> bool REHex::ByteRangeMap<T>::data_erased(off_t offset, off_
 		
 		elements_changed = true;
 	}
+	
+	last_get_iter = ranges.end();
 	
 	return elements_changed;
 }
