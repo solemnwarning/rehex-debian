@@ -8,9 +8,10 @@ A cross-platform (Windows, Linux, Mac) hex editor for reverse engineering, and e
 * Decoding of integer/floating point value types
 * Inline disassembly of machine code
 * Highlighting and annotation of ranges of bytes
-* Side by side comparision of selections
-* Lua scripting support ([API reference here](http://www.solemnwarning.net/rehex-luadoc/))
+* Side by side comparision of whole files or selections
+* Lua scripting support ([API reference](http://www.solemnwarning.net/rehex-luadoc/))
 * Virtual address mapping support
+* Support for common text encodings (ASCII, Unicode, ISO-8859-X)
 
 ![inline comments + data types demo](doc/comments-types.gif)
 
@@ -33,7 +34,7 @@ Add the following lines to your `/etc/apt/sources.list` file:
     deb http://repos.solemnwarning.net/debian/ CODENAME main
     deb-src http://repos.solemnwarning.net/debian/ CODENAME main
 
-Replace `CODENAME` with the version you're running (e.g. `buster` or `stretch`).
+**NOTE:** Replace `CODENAME` with the version you're running (e.g. `bullseye` or `buster`).
 
 Finally, you can install the package:
 
@@ -48,10 +49,17 @@ First, you will need to add my APT signing key to your system:
 
 Add the following lines to your `/etc/apt/sources.list` file:
 
-    deb http://repos.solemnwarning.net/ubuntu/ CODENAME main
-    deb-src http://repos.solemnwarning.net/ubuntu/ CODENAME main
+If running Ubuntu 20.04 (Focal Fossa) or later:
 
-Replace `CODENAME` with the version you're running (e.g. `groovy` for 20.10 or `focal` for 20.04).
+    deb  [arch=amd64] http://repos.solemnwarning.net/ubuntu/ CODENAME main
+    deb-src  [arch=amd64] http://repos.solemnwarning.net/ubuntu/ CODENAME main
+
+**NOTE:** Replace `CODENAME` with the version you're running (e.g. `focal` for 20.04 or `hirsute` for 21.04).
+
+If running Ubuntu 18.04 (Bionic Beaver):
+
+    deb http://repos.solemnwarning.net/ubuntu/ bionic main
+    deb-src http://repos.solemnwarning.net/ubuntu/ bionic main
 
 Finally, you can install the package:
 
@@ -78,7 +86,7 @@ Finally, you can install the package:
 
 ## Building
 
-If you want to compile on Linux, just check out the source and run `make`. You will need Jansson, wxWidgets, Capstone and Lua installed, along with their development packages (Install `build-essential`, `git`, `libwxgtk3.0-dev`, `libjansson-dev`, `libcapstone-dev`, `liblua5.3-dev` and `lua5.3` on Ubuntu).
+If you want to compile on Linux, just check out the source and run `make`. You will need Jansson, wxWidgets, GTK+, Capstone, Lua and libunistring installed, along with their development packages (Install `build-essential`, `git`, `libwxgtk3.0-dev`, `libgtk-3-dev`, `libjansson-dev`, `libcapstone-dev`, `liblua5.3-dev`, `lua5.3` and `libunistring-dev` on Ubuntu).
 
 The resulting build can be installed using `make install`, which accepts all the standard environment variables.
 

@@ -1,5 +1,5 @@
 /* Reverse Engineer's Hex Editor
- * Copyright (C) 2017-2020 Daniel Collins <solemnwarning@solemnwarning.net>
+ * Copyright (C) 2017-2021 Daniel Collins <solemnwarning@solemnwarning.net>
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 as published by
@@ -47,10 +47,12 @@
 #include "../res/icon64.h"
 
 #ifdef __APPLE__
+#include "../res/backward32.h"
 #include "../res/document_new32.h"
 #include "../res/document_open32.h"
 #include "../res/document_save32.h"
 #include "../res/document_save_as32.h"
+#include "../res/forward32.h"
 #endif
 
 enum {
@@ -61,8 +63,10 @@ enum {
 	ID_SEARCH_TEXT,
 	ID_SEARCH_BSEQ,
 	ID_SEARCH_VALUE,
+	ID_COMPARE_FILE,
 	ID_GOTO_OFFSET,
 	ID_OVERWRITE_MODE,
+	ID_WRITE_PROTECT,
 	ID_SAVE_VIEW,
 	ID_INLINE_COMMENTS_HIDDEN,
 	ID_INLINE_COMMENTS_FULL,
@@ -88,6 +92,7 @@ enum {
 
 BEGIN_EVENT_TABLE(REHex::MainWindow, wxFrame)
 	EVT_CLOSE(REHex::MainWindow::OnWindowClose)
+	EVT_CHAR_HOOK(REHex::MainWindow::OnCharHook)
 	
 	EVT_MENU(wxID_NEW,        REHex::MainWindow::OnNew)
 	EVT_MENU(wxID_OPEN,       REHex::MainWindow::OnOpen)
@@ -97,6 +102,9 @@ BEGIN_EVENT_TABLE(REHex::MainWindow, wxFrame)
 	EVT_MENU(ID_CLOSE_ALL,    REHex::MainWindow::OnCloseAll)
 	EVT_MENU(ID_CLOSE_OTHERS, REHex::MainWindow::OnCloseOthers)
 	EVT_MENU(wxID_EXIT,       REHex::MainWindow::OnExit)
+	
+	EVT_MENU(wxID_BACKWARD, REHex::MainWindow::OnCursorPrev)
+	EVT_MENU(wxID_FORWARD,  REHex::MainWindow::OnCursorNext)
 	
 	EVT_MENU(wxID_FILE1, REHex::MainWindow::OnRecentOpen)
 	EVT_MENU(wxID_FILE2, REHex::MainWindow::OnRecentOpen)
@@ -116,10 +124,13 @@ BEGIN_EVENT_TABLE(REHex::MainWindow, wxFrame)
 	
 	EVT_MENU(ID_FILL_RANGE, REHex::MainWindow::OnFillRange)
 	EVT_MENU(ID_OVERWRITE_MODE, REHex::MainWindow::OnOverwriteMode)
+	EVT_MENU(ID_WRITE_PROTECT, REHex::MainWindow::OnWriteProtect)
 	
 	EVT_MENU(ID_SEARCH_TEXT, REHex::MainWindow::OnSearchText)
 	EVT_MENU(ID_SEARCH_BSEQ,  REHex::MainWindow::OnSearchBSeq)
 	EVT_MENU(ID_SEARCH_VALUE,  REHex::MainWindow::OnSearchValue)
+	
+	EVT_MENU(ID_COMPARE_FILE,  REHex::MainWindow::OnCompareFile)
 	
 	EVT_MENU(ID_GOTO_OFFSET, REHex::MainWindow::OnGotoOffset)
 	
@@ -241,13 +252,19 @@ REHex::MainWindow::MainWindow(const wxSize& size):
 		edit_menu->AppendCheckItem(ID_OVERWRITE_MODE, "Overwrite mode\tIns");
 		#endif
 		
+		edit_menu->AppendCheckItem(ID_WRITE_PROTECT, "Write protect file data");
+		
 		edit_menu->AppendSeparator(); /* ---- */
 		
 		edit_menu->Append(ID_SEARCH_TEXT,  "Search for text...");
 		edit_menu->Append(ID_SEARCH_BSEQ,  "Search for byte sequence...");
 		edit_menu->Append(ID_SEARCH_VALUE, "Search for value...");
 		
-		edit_menu->AppendSeparator();
+		edit_menu->AppendSeparator(); /* ---- */
+		
+		edit_menu->Append(ID_COMPARE_FILE, "Compare whole file...\tCtrl-K");
+		
+		edit_menu->AppendSeparator(); /* ---- */
 		
 		edit_menu->Append(ID_GOTO_OFFSET, "Jump to offset...\tCtrl-G");
 		
@@ -353,7 +370,7 @@ REHex::MainWindow::MainWindow(const wxSize& size):
 				itm->Check(true);
 			}
 			
-			Bind(wxEVT_MENU, [this, font_name, itm](wxCommandEvent &event)
+			Bind(wxEVT_MENU, [font_name, itm](wxCommandEvent &event)
 			{
 				wxGetApp().set_font_name(font_name);
 				itm->Check(true);
@@ -432,11 +449,21 @@ REHex::MainWindow::MainWindow(const wxSize& size):
 	toolbar->AddTool(wxID_OPEN,   "Open",    wxBITMAP_PNG_FROM_DATA(document_open32));
 	toolbar->AddTool(wxID_SAVE,   "Save",    wxBITMAP_PNG_FROM_DATA(document_save32));
 	toolbar->AddTool(wxID_SAVEAS, "Save As", wxBITMAP_PNG_FROM_DATA(document_save_as32));
+	
+	toolbar->AddSeparator();
+	
+	toolbar->AddTool(wxID_BACKWARD, "Previous cursor position", wxBITMAP_PNG_FROM_DATA(backward32));
+	toolbar->AddTool(wxID_FORWARD,  "Next cursor position",     wxBITMAP_PNG_FROM_DATA(forward32));
 	#else
 	toolbar->AddTool(wxID_NEW,    "New",     artp.GetBitmap(wxART_NEW,          wxART_TOOLBAR));
 	toolbar->AddTool(wxID_OPEN,   "Open",    artp.GetBitmap(wxART_FILE_OPEN,    wxART_TOOLBAR));
 	toolbar->AddTool(wxID_SAVE,   "Save",    artp.GetBitmap(wxART_FILE_SAVE,    wxART_TOOLBAR));
 	toolbar->AddTool(wxID_SAVEAS, "Save As", artp.GetBitmap(wxART_FILE_SAVE_AS, wxART_TOOLBAR));
+	
+	toolbar->AddSeparator();
+	
+	toolbar->AddTool(wxID_BACKWARD, "Previous cursor position", artp.GetBitmap(wxART_GO_BACK,    wxART_TOOLBAR));
+	toolbar->AddTool(wxID_FORWARD,  "Next cursor position",     artp.GetBitmap(wxART_GO_FORWARD, wxART_TOOLBAR));
 	#endif
 	
 	toolbar->Realize();
@@ -548,6 +575,21 @@ void REHex::MainWindow::OnWindowClose(wxCloseEvent &event)
 	
 	/* Base implementation will deal with cleaning up the window. */
 	event.Skip();
+}
+
+void REHex::MainWindow::OnCharHook(wxKeyEvent &event)
+{
+	int modifiers = event.GetModifiers();
+	int key = event.GetKeyCode();
+	
+	if(modifiers == (wxMOD_CMD | wxMOD_SHIFT) && key == 'K')
+	{
+		Tab *tab = active_tab();
+		tab->compare_selection();
+	}
+	else{
+		event.Skip();
+	}
 }
 
 void REHex::MainWindow::OnNew(wxCommandEvent &event)
@@ -702,6 +744,18 @@ void REHex::MainWindow::OnExit(wxCommandEvent &event)
 	Close();
 }
 
+void REHex::MainWindow::OnCursorPrev(wxCommandEvent &event)
+{
+	Tab *tab = active_tab();
+	tab->doc_ctrl->goto_prev_cursor_position();
+}
+
+void REHex::MainWindow::OnCursorNext(wxCommandEvent &event)
+{
+	Tab *tab = active_tab();
+	tab->doc_ctrl->goto_next_cursor_position();
+}
+
 void REHex::MainWindow::OnSearchText(wxCommandEvent &event)
 {
 	wxWindow *cpage = notebook->GetCurrentPage();
@@ -742,6 +796,12 @@ void REHex::MainWindow::OnSearchValue(wxCommandEvent &event)
 	sd->Show(true);
 	
 	tab->search_dialog_register(sd);
+}
+
+void REHex::MainWindow::OnCompareFile(wxCommandEvent &event)
+{
+	Tab *tab = active_tab();
+	tab->compare_whole_file();
 }
 
 void REHex::MainWindow::OnGotoOffset(wxCommandEvent &event)
@@ -837,7 +897,10 @@ void REHex::MainWindow::OnPaste(wxCommandEvent &event)
 			wxTheClipboard->GetData(data);
 			
 			try {
-				tab->paste_text(data.GetText().ToStdString());
+				wxString clipboard_text = data.GetText();
+				const wxScopedCharBuffer clipboard_utf8 = clipboard_text.utf8_str();
+				
+				tab->paste_text(std::string(clipboard_utf8.data(), clipboard_utf8.length()));
 			}
 			catch(const std::exception &e)
 			{
@@ -902,6 +965,27 @@ void REHex::MainWindow::OnOverwriteMode(wxCommandEvent &event)
 {
 	Tab *tab = active_tab();
 	tab->doc_ctrl->set_insert_mode(!event.IsChecked());
+}
+
+void REHex::MainWindow::OnWriteProtect(wxCommandEvent &event)
+{
+	Document *doc = active_document();
+	
+	if(event.IsChecked() && doc->is_buffer_dirty())
+	{
+		std::string msg
+			= "The content of " + doc->get_title() + " has already been modified.\n"
+			+ "Enable write protect to prevent FURTHER changes?";
+		
+		int res = wxMessageBox(msg, "File data modified", (wxYES_NO | wxICON_EXCLAMATION), this);
+		if(res == wxNO)
+		{
+			edit_menu->Check(ID_WRITE_PROTECT, false);
+			return;
+		}
+	}
+	
+	doc->set_write_protect(event.IsChecked());
 }
 
 void REHex::MainWindow::OnSetBytesPerLine(wxCommandEvent &event)
@@ -1149,6 +1233,7 @@ void REHex::MainWindow::OnDocumentChange(wxAuiNotebookEvent& event)
 	Tab *tab = active_tab();
 	
 	edit_menu->Check(ID_OVERWRITE_MODE, !tab->doc_ctrl->get_insert_mode());
+	edit_menu->Check(ID_WRITE_PROTECT, tab->doc->get_write_protect());
 	view_menu->Check(ID_SHOW_OFFSETS, tab->doc_ctrl->get_show_offsets());
 	view_menu->Check(ID_SHOW_ASCII,   tab->doc_ctrl->get_show_ascii());
 	
@@ -1216,6 +1301,7 @@ void REHex::MainWindow::OnDocumentChange(wxAuiNotebookEvent& event)
 	_update_status_mode(tab->doc_ctrl);
 	_update_undo(tab->doc);
 	_update_dirty(tab->doc);
+	_update_cpos_buttons(tab->doc_ctrl);
 	
 	/* Show any search dialogs attached to this tab. */
 	tab->unhide_child_windows();
@@ -1320,6 +1406,11 @@ void REHex::MainWindow::OnCursorUpdate(CursorUpdateEvent &event)
 		 * active document.
 		*/
 		_update_status_offset(active_tab);
+	}
+	
+	if(event_src == active_tab->doc || event_src == active_tab->doc_ctrl)
+	{
+		_update_cpos_buttons(active_tab->doc_ctrl);
 	}
 	
 	event.Skip();
@@ -1433,6 +1524,25 @@ REHex::Document *REHex::MainWindow::active_document()
 	return active_tab()->doc;
 }
 
+void REHex::MainWindow::switch_tab(DocumentCtrl *doc_ctrl)
+{
+	size_t num_tabs = notebook->GetPageCount();
+	
+	for(size_t i = 0; i < num_tabs; ++i)
+	{
+		wxWindow *page = notebook->GetPage(i);
+		
+		auto tab = dynamic_cast<Tab*>(page);
+		assert(tab != NULL);
+		
+		if(tab->doc_ctrl == doc_ctrl)
+		{
+			notebook->SetSelection(i);
+			break;
+		}
+	}
+}
+
 void REHex::MainWindow::_update_status_offset(Tab *tab)
 {
 	off_t off = tab->doc->get_cursor_position();
@@ -1526,6 +1636,14 @@ void REHex::MainWindow::_update_dirty(REHex::Document *doc)
 	toolbar->EnableTool(wxID_SAVE,   enable_save);
 	
 	notebook->SetPageBitmap(notebook->GetSelection(), (dirty ? notebook_dirty_bitmap : wxNullBitmap));
+}
+
+void REHex::MainWindow::_update_cpos_buttons(DocumentCtrl *doc_ctrl)
+{
+	wxToolBar *toolbar = GetToolBar();
+	
+	toolbar->EnableTool(wxID_BACKWARD, doc_ctrl->has_prev_cursor_position());
+	toolbar->EnableTool(wxID_FORWARD,  doc_ctrl->has_next_cursor_position());
 }
 
 bool REHex::MainWindow::unsaved_confirm()
