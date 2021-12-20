@@ -90,10 +90,17 @@ res/ascii16.png
 res/ascii24.png
 res/ascii32.png
 res/ascii48.png
+res/backward32.png
+res/diff_fold16.png
+res/diff_fold24.png
+res/diff_fold32.png
+res/diff_fold48.png
 res/document_new32.png
 res/document_open32.png
 res/document_save32.png
 res/document_save_as32.png
+res/down32.png
+res/forward32.png
 res/icon.ico
 res/icon1024.png
 res/icon128.png
@@ -109,6 +116,8 @@ res/offsets24.png
 res/offsets32.png
 res/offsets48.png
 res/rehex.desktop
+res/spinner24.gif
+res/up32.png
 res/version.cpp
 res/version.h
 res/winres.h
@@ -116,6 +125,7 @@ res/winres.rc
 src/AboutDialog.cpp
 src/AboutDialog.hpp
 src/App.hpp
+src/AppMac.mm
 src/AppMain.cpp
 src/AppTestable.cpp
 src/ArtProvider.cpp
@@ -127,6 +137,8 @@ src/ByteRangeSet.cpp
 src/ByteRangeSet.hpp
 src/BytesPerLineDialog.cpp
 src/BytesPerLineDialog.hpp
+src/CharacterEncoder.cpp
+src/CharacterEncoder.hpp
 src/ClickText.cpp
 src/ClickText.hpp
 src/CodeCtrl.cpp
@@ -152,6 +164,7 @@ src/Events.cpp
 src/Events.hpp
 src/FillRangeDialog.cpp
 src/FillRangeDialog.hpp
+src/LRUCache.hpp
 src/LicenseDialog.cpp
 src/LicenseDialog.hpp
 src/LuaPluginLoader.cpp
@@ -203,6 +216,7 @@ src/win32lib.cpp
 src/win32lib.hpp
 tests/ByteRangeMap.cpp
 tests/ByteRangeSet.cpp
+tests/CharacterEncoder.cpp
 tests/CommentTree.cpp
 tests/CommentsDataObject.cpp
 tests/ConsoleBuffer.cpp
@@ -234,6 +248,7 @@ tests/search-text.cpp
 tests/stub-plugin.lua
 tests/util.cpp
 tools/embed.cpp
+tools/gtk-config.cpp
 update-wxlua.sh
 vcpkg/install_vcpkg_dependencies.bat
 vcpkg/thirdparty.props
