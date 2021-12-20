@@ -33,6 +33,8 @@
 
 #include "App.hpp"
 #include "document.hpp"
+#include "CharacterEncoder.hpp"
+#include "DataType.hpp"
 #include "Events.hpp"
 #include "Palette.hpp"
 #include "textentrydialog.hpp"
@@ -53,7 +55,9 @@ wxDEFINE_EVENT(REHex::EV_TYPES_CHANGED,       wxCommandEvent);
 wxDEFINE_EVENT(REHex::EV_MAPPINGS_CHANGED,    wxCommandEvent);
 
 REHex::Document::Document():
-	current_seq(1),
+	write_protect(false),
+	current_seq(0),
+	buffer_seq(0),
 	saved_seq(0),
 	cursor_state(CSTATE_HEX)
 {
@@ -63,14 +67,16 @@ REHex::Document::Document():
 
 REHex::Document::Document(const std::string &filename):
 	filename(filename),
+	write_protect(false),
 	current_seq(0),
+	buffer_seq(0),
 	saved_seq(0),
 	cursor_state(CSTATE_HEX)
 {
 	buffer = new REHex::Buffer(filename);
 	
-	data_seq.set_range(0, buffer->length(), 0);
-	types.set_range   (0, buffer->length(), "");
+	data_seq.set_range   (0, buffer->length(), 0);
+	types.set_range      (0, buffer->length(), "");
 	
 	size_t last_slash = filename.find_last_of("/\\");
 	title = (last_slash != std::string::npos ? filename.substr(last_slash + 1) : filename);
@@ -95,6 +101,7 @@ void REHex::Document::save()
 	if(current_seq != saved_seq)
 	{
 		saved_seq = current_seq;
+		buffer_seq = saved_seq;
 		data_seq.set_range(0, buffer->length(), saved_seq);
 		
 		_raise_clean();
@@ -114,6 +121,7 @@ void REHex::Document::save(const std::string &filename)
 	if(current_seq != saved_seq)
 	{
 		saved_seq = current_seq;
+		buffer_seq = saved_seq;
 		data_seq.set_range(0, buffer->length(), saved_seq);
 		
 		_raise_clean();
@@ -142,6 +150,11 @@ bool REHex::Document::is_byte_dirty(off_t offset) const
 {
 	auto i = data_seq.get_range(offset);
 	return i != data_seq.end() && i->second != saved_seq;
+}
+
+bool REHex::Document::is_buffer_dirty() const
+{
+	return buffer_seq != saved_seq;
 }
 
 off_t REHex::Document::get_cursor_position() const
@@ -194,6 +207,12 @@ std::vector<unsigned char> REHex::Document::read_data(off_t offset, off_t max_le
 
 void REHex::Document::overwrite_data(off_t offset, const void *data, off_t length, off_t new_cursor_pos, CursorState new_cursor_state, const char *change_desc)
 {
+	if(write_protect)
+	{
+		wxGetApp().printf_error("Cannot modify file - write protect is enabled\n");
+		return;
+	}
+	
 	if(new_cursor_pos < 0)                 { new_cursor_pos = cpos_off; }
 	if(new_cursor_state == CSTATE_CURRENT) { new_cursor_state = cursor_state; }
 	
@@ -207,6 +226,8 @@ void REHex::Document::overwrite_data(off_t offset, const void *data, off_t lengt
 			.transform([](const unsigned int &value) { return value + 1; });
 		
 		_UNTRACKED_overwrite_data(offset, (const unsigned char*)(data), length, new_data_seq_slice);
+		buffer_seq = current_seq;
+		
 		_set_cursor_position(new_cursor_pos, new_cursor_state);
 		
 		return _op_overwrite_undo(offset, old_data, new_cursor_pos, new_cursor_state);
@@ -227,6 +248,7 @@ REHex::Document::TransOpFunc REHex::Document::_op_overwrite_undo(off_t offset, s
 			.transform([](const unsigned int &value) { return value - 1; });
 		
 		_UNTRACKED_overwrite_data(offset, old_data->data(), old_data->size(), new_data_seq_slice);
+		buffer_seq = current_seq;
 		
 		return _op_overwrite_redo(offset, new_data, new_cursor_pos, new_cursor_state);
 	});
@@ -244,14 +266,22 @@ REHex::Document::TransOpFunc REHex::Document::_op_overwrite_redo(off_t offset, s
 			.transform([](const unsigned int &value) { return value + 1; });
 		
 		_UNTRACKED_overwrite_data(offset, new_data->data(), new_data->size(), new_data_seq_slice);
+		buffer_seq = current_seq;
+		
 		_set_cursor_position(new_cursor_pos, new_cursor_state);
 		
 		return _op_overwrite_undo(offset, old_data, new_cursor_pos, new_cursor_state);
 	});
 }
 
-void REHex::Document::insert_data(off_t offset, const unsigned char *data, off_t length, off_t new_cursor_pos, CursorState new_cursor_state, const char *change_desc)
+void REHex::Document::insert_data(off_t offset, const void *data, off_t length, off_t new_cursor_pos, CursorState new_cursor_state, const char *change_desc)
 {
+	if(write_protect)
+	{
+		wxGetApp().printf_error("Cannot modify file - write protect is enabled\n");
+		return;
+	}
+	
 	if(new_cursor_pos < 0)                 { new_cursor_pos = cpos_off; }
 	if(new_cursor_state == CSTATE_CURRENT) { new_cursor_state = cursor_state; }
 	
@@ -261,6 +291,8 @@ void REHex::Document::insert_data(off_t offset, const unsigned char *data, off_t
 		new_data_seq_slice.set_range(offset, length, current_seq);
 		
 		_UNTRACKED_insert_data(offset, (const unsigned char*)(data), length, new_data_seq_slice);
+		buffer_seq = current_seq;
+		
 		_set_cursor_position(new_cursor_pos, new_cursor_state);
 		
 		return _op_insert_undo(offset, length, new_cursor_pos, new_cursor_state);
@@ -279,6 +311,7 @@ REHex::Document::TransOpFunc REHex::Document::_op_insert_undo(off_t offset, off_
 		ByteRangeMap<unsigned int> redo_data_seq_slice = data_seq.get_slice(offset, data->size());
 		
 		_UNTRACKED_erase_data(offset, data->size());
+		buffer_seq = current_seq;
 		
 		return _op_insert_redo(offset, data, new_cursor_pos, new_cursor_state, redo_data_seq_slice);
 	});
@@ -289,6 +322,8 @@ REHex::Document::TransOpFunc REHex::Document::_op_insert_redo(off_t offset, std:
 	return TransOpFunc([this, offset, data, new_cursor_pos, new_cursor_state, redo_data_seq_slice]()
 	{
 		_UNTRACKED_insert_data(offset, data->data(), data->size(), redo_data_seq_slice);
+		buffer_seq = current_seq;
+		
 		_set_cursor_position(new_cursor_pos, new_cursor_state);
 		
 		return _op_insert_undo(offset, data->size(), new_cursor_pos, new_cursor_state);
@@ -297,6 +332,12 @@ REHex::Document::TransOpFunc REHex::Document::_op_insert_redo(off_t offset, std:
 
 void REHex::Document::erase_data(off_t offset, off_t length, off_t new_cursor_pos, CursorState new_cursor_state, const char *change_desc)
 {
+	if(write_protect)
+	{
+		wxGetApp().printf_error("Cannot modify file - write protect is enabled\n");
+		return;
+	}
+	
 	if(new_cursor_pos < 0)                 { new_cursor_pos = cpos_off; }
 	if(new_cursor_state == CSTATE_CURRENT) { new_cursor_state = cursor_state; }
 	
@@ -308,6 +349,8 @@ void REHex::Document::erase_data(off_t offset, off_t length, off_t new_cursor_po
 		ByteRangeMap<unsigned int> undo_data_seq_slice = data_seq.get_slice(offset, old_data->size());
 		
 		_UNTRACKED_erase_data(offset, old_data->size());
+		buffer_seq = current_seq;
+		
 		_set_cursor_position(new_cursor_pos, new_cursor_state);
 		
 		return _op_erase_undo(offset, old_data, new_cursor_pos, new_cursor_state, undo_data_seq_slice);
@@ -321,6 +364,7 @@ REHex::Document::TransOpFunc REHex::Document::_op_erase_undo(off_t offset, std::
 	return TransOpFunc([this, offset, old_data, new_cursor_pos, new_cursor_state, undo_data_seq_slice]()
 	{
 		_UNTRACKED_insert_data(offset, old_data->data(), old_data->size(), undo_data_seq_slice);
+		buffer_seq = current_seq;
 		
 		return _op_erase_redo(offset, old_data->size(), new_cursor_pos, new_cursor_state);
 	});
@@ -336,14 +380,22 @@ REHex::Document::TransOpFunc REHex::Document::_op_erase_redo(off_t offset, off_t
 		ByteRangeMap<unsigned int> undo_data_seq_slice = data_seq.get_slice(offset, old_data->size());
 		
 		_UNTRACKED_erase_data(offset, old_data->size());
+		buffer_seq = current_seq;
+		
 		_set_cursor_position(new_cursor_pos, new_cursor_state);
 		
 		return _op_erase_undo(offset, old_data, new_cursor_pos, new_cursor_state, undo_data_seq_slice);
 	});
 }
 
-void REHex::Document::replace_data(off_t offset, off_t old_data_length, const unsigned char *new_data, off_t new_data_length, off_t new_cursor_pos, CursorState new_cursor_state, const char *change_desc)
+void REHex::Document::replace_data(off_t offset, off_t old_data_length, const void *new_data, off_t new_data_length, off_t new_cursor_pos, CursorState new_cursor_state, const char *change_desc)
 {
+	if(write_protect)
+	{
+		wxGetApp().printf_error("Cannot modify file - write protect is enabled\n");
+		return;
+	}
+	
 	if(new_cursor_pos < 0)                 { new_cursor_pos = cpos_off; }
 	if(new_cursor_state == CSTATE_CURRENT) { new_cursor_state = cursor_state; }
 	
@@ -363,10 +415,12 @@ void REHex::Document::replace_data(off_t offset, off_t old_data_length, const un
 		ByteRangeMap<unsigned int> undo_data_seq_slice = data_seq.get_slice(offset, old_data->size());
 		
 		ByteRangeMap<unsigned int> new_data_seq_slice;
-		new_data_seq_slice.set_range(offset, old_data->size(), current_seq);
+		new_data_seq_slice.set_range(offset, new_data_length, current_seq);
 		
 		_UNTRACKED_erase_data(offset, old_data->size());
-		_UNTRACKED_insert_data(offset, new_data, new_data_length, new_data_seq_slice);
+		_UNTRACKED_insert_data(offset, (const unsigned char*)(new_data), new_data_length, new_data_seq_slice);
+		buffer_seq = current_seq;
+		
 		_set_cursor_position(new_cursor_pos, new_cursor_state);
 		
 		return _op_replace_undo(offset, old_data, new_data_length, new_cursor_pos, new_cursor_state, undo_data_seq_slice);
@@ -384,6 +438,7 @@ REHex::Document::TransOpFunc REHex::Document::_op_replace_undo(off_t offset, std
 		
 		_UNTRACKED_erase_data(offset, new_data_length);
 		_UNTRACKED_insert_data(offset, old_data->data(), old_data->size(), undo_data_seq_slice);
+		buffer_seq = current_seq;
 		
 		return _op_replace_redo(offset, old_data->size(), new_data, new_cursor_pos, new_cursor_state);
 	});
@@ -399,19 +454,255 @@ REHex::Document::TransOpFunc REHex::Document::_op_replace_redo(off_t offset, off
 		ByteRangeMap<unsigned int> undo_data_seq_slice = data_seq.get_slice(offset, old_data->size());
 		
 		ByteRangeMap<unsigned int> new_data_seq_slice;
-		new_data_seq_slice.set_range(offset, old_data->size(), current_seq);
+		new_data_seq_slice.set_range(offset, new_data->size(), current_seq);
 		
 		_UNTRACKED_erase_data(offset, old_data_length);
 		_UNTRACKED_insert_data(offset, new_data->data(), new_data->size(), new_data_seq_slice);
+		buffer_seq = current_seq;
+		
 		_set_cursor_position(new_cursor_pos, new_cursor_state);
 		
 		return _op_replace_undo(offset, old_data, new_data->size(), new_cursor_pos, new_cursor_state, undo_data_seq_slice);
 	});
 }
 
+int REHex::Document::overwrite_text(off_t offset, const std::string &utf8_text, off_t new_cursor_pos, CursorState new_cursor_state, const char *change_desc)
+{
+	off_t buffer_length = buffer->length();
+	
+	if(offset < 0 || offset >= buffer_length)
+	{
+		return WRITE_TEXT_BAD_OFFSET;
+	}
+	
+	std::string encoded_text;
+	encoded_text.reserve(utf8_text.size()); /* Assume it'll be about the same size after encoding. */
+	
+	int ret_flags = WRITE_TEXT_OK;
+	
+	CharacterEncoderIconv utf8_encoder("UTF-8", 1);
+	
+	for(off_t utf8_off = 0, write_pos = offset; utf8_off < (off_t)(utf8_text.size());)
+	{
+		if(write_pos >= buffer_length)
+		{
+			/* Won't fit without extending document. */
+			ret_flags |= WRITE_TEXT_TRUNCATED;
+			break;
+		}
+		
+		const CharacterEncoder *encoder = get_text_encoder(write_pos);
+		assert(encoder != NULL);
+		
+		EncodedCharacter ec = encoder->encode(utf8_text.substr(utf8_off, MAX_CHAR_SIZE));
+		
+		if(ec.valid)
+		{
+			if((write_pos + (off_t)(ec.encoded_char().size())) > buffer_length)
+			{
+				/* Won't fit without extending document. */
+				ret_flags |= WRITE_TEXT_TRUNCATED;
+				break;
+			}
+			
+			encoded_text.append(ec.encoded_char());
+			write_pos += ec.encoded_char().size();
+			
+			utf8_off += ec.utf8_char().size();
+		}
+		else{
+			/* Character cannot be represented in destination encoding. Skip it. */
+			
+			/* Decode the input as a UTF-8 character to find the length. */
+			EncodedCharacter ec = utf8_encoder.decode((utf8_text.data() + utf8_off), (utf8_text.size() - utf8_off));
+			
+			if(ec.valid)
+			{
+				utf8_off += ec.utf8_char().size();
+			}
+			else{
+				/* Unable to parse input character... skip a byte and hope for the best. */
+				++utf8_off;
+			}
+			
+			ret_flags |= WRITE_TEXT_SKIPPED;
+		}
+	}
+	
+	assert((offset + (off_t)(encoded_text.size())) <= buffer_length);
+	
+	if(new_cursor_pos == WRITE_TEXT_GOTO_NEXT)
+	{
+		new_cursor_pos = offset + (off_t)(encoded_text.size());
+	}
+	
+	overwrite_data(offset, encoded_text.data(), encoded_text.size(), new_cursor_pos, new_cursor_state, change_desc);
+	
+	return ret_flags;
+}
+
+int REHex::Document::insert_text(off_t offset, const std::string &utf8_text, off_t new_cursor_pos, CursorState new_cursor_state, const char *change_desc)
+{
+	off_t buffer_length = buffer->length();
+	
+	if(offset < 0 || offset > buffer_length)
+	{
+		return WRITE_TEXT_BAD_OFFSET;
+	}
+	
+	std::string encoded_text;
+	encoded_text.reserve(utf8_text.size()); /* Assume it'll be about the same size after encoding. */
+	
+	int ret_flags = WRITE_TEXT_OK;
+	
+	CharacterEncoderIconv utf8_encoder("UTF-8", 1);
+	
+	std::string data_type;
+	const CharacterEncoder *encoder;
+	
+	if(buffer_length > 0)
+	{
+		off_t ref_offset = std::min(offset, (buffer_length - 1)); /* Offset to copy encoding from. */
+		
+		auto type = types.get_range(ref_offset);
+		assert(type != types.end());
+		
+		data_type = type->second;
+		encoder = get_text_encoder(ref_offset);
+	}
+	else{
+		data_type = "";
+		encoder = &ascii_encoder;
+	}
+	
+	for(off_t utf8_off = 0; utf8_off < (off_t)(utf8_text.size());)
+	{
+		EncodedCharacter ec = encoder->encode(utf8_text.substr(utf8_off, MAX_CHAR_SIZE));
+		
+		if(ec.valid)
+		{
+			encoded_text.append(ec.encoded_char());
+			
+			utf8_off += ec.utf8_char().size();
+		}
+		else{
+			/* Character cannot be represented in destination encoding. Skip it. */
+			
+			/* Decode the input as a UTF-8 character to find the length. */
+			EncodedCharacter ec = utf8_encoder.decode((utf8_text.data() + utf8_off), (utf8_text.size() - utf8_off));
+			
+			if(ec.valid)
+			{
+				utf8_off += ec.utf8_char().size();
+			}
+			else{
+				/* Unable to parse input character... skip a byte and hope for the best. */
+				++utf8_off;
+			}
+			
+			ret_flags |= WRITE_TEXT_SKIPPED;
+		}
+	}
+	
+	if(new_cursor_pos == WRITE_TEXT_GOTO_NEXT)
+	{
+		new_cursor_pos = offset + (off_t)(encoded_text.size());
+	}
+	
+	ScopedTransaction t(this, change_desc);
+	
+	if(!encoded_text.empty())
+	{
+		insert_data(offset, encoded_text.data(), encoded_text.size(), new_cursor_pos, new_cursor_state);
+		set_data_type(offset, encoded_text.size(), data_type);
+	}
+	
+	t.commit();
+	
+	return ret_flags;
+}
+
+int REHex::Document::replace_text(off_t offset, off_t old_data_length, const std::string &utf8_text, off_t new_cursor_pos, CursorState new_cursor_state, const char *change_desc)
+{
+	off_t buffer_length = buffer->length();
+	
+	if(offset < 0 || offset >= buffer_length)
+	{
+		return WRITE_TEXT_BAD_OFFSET;
+	}
+	
+	std::string encoded_text;
+	encoded_text.reserve(utf8_text.size()); /* Assume it'll be about the same size after encoding. */
+	
+	int ret_flags = WRITE_TEXT_OK;
+	
+	CharacterEncoderIconv utf8_encoder("UTF-8", 1);
+	
+	const CharacterEncoder *encoder = get_text_encoder(offset);
+	assert(encoder != NULL);
+	
+	std::string data_type = types.get_range(offset)->second;
+	
+	for(off_t utf8_off = 0; utf8_off < (off_t)(utf8_text.size());)
+	{
+		EncodedCharacter ec = encoder->encode(utf8_text.substr(utf8_off, MAX_CHAR_SIZE));
+		
+		if(ec.valid)
+		{
+			encoded_text.append(ec.encoded_char());
+			
+			utf8_off += ec.utf8_char().size();
+		}
+		else{
+			/* Character cannot be represented in destination encoding. Skip it. */
+			
+			/* Decode the input as a UTF-8 character to find the length. */
+			EncodedCharacter ec = utf8_encoder.decode((utf8_text.data() + utf8_off), (utf8_text.size() - utf8_off));
+			
+			if(ec.valid)
+			{
+				utf8_off += ec.utf8_char().size();
+			}
+			else{
+				/* Unable to parse input character... skip a byte and hope for the best. */
+				++utf8_off;
+			}
+			
+			ret_flags |= WRITE_TEXT_SKIPPED;
+		}
+	}
+	
+	if(new_cursor_pos == WRITE_TEXT_GOTO_NEXT)
+	{
+		new_cursor_pos = offset + (off_t)(encoded_text.size());
+	}
+	
+	ScopedTransaction t(this, change_desc);
+	
+	if(!encoded_text.empty())
+	{
+		replace_data(offset, old_data_length, encoded_text.data(), encoded_text.size(), new_cursor_pos, new_cursor_state);
+		set_data_type(offset, encoded_text.size(), data_type);
+	}
+	
+	t.commit();
+	
+	return ret_flags;
+}
+
 off_t REHex::Document::buffer_length() const
 {
 	return buffer->length();
+}
+
+void REHex::Document::set_write_protect(bool write_protect)
+{
+	this->write_protect = write_protect;
+}
+
+bool REHex::Document::get_write_protect() const
+{
+	return write_protect;
 }
 
 const REHex::NestedOffsetLengthMap<REHex::Document::Comment> &REHex::Document::get_comments() const
@@ -550,6 +841,29 @@ bool REHex::Document::set_data_type(off_t offset, off_t length, const std::strin
 		});
 	
 	return true;
+}
+
+const REHex::CharacterEncoder *REHex::Document::get_text_encoder(off_t offset) const
+{
+	if(offset < 0 || offset >= buffer_length())
+	{
+		return NULL;
+	}
+	
+	auto type_at_off = types.get_range(offset);
+	assert(type_at_off != types.end());
+	
+	if(type_at_off->second != "")
+	{
+		const DataTypeRegistration *dt_reg = DataTypeRegistry::by_name(type_at_off->second);
+		assert(dt_reg != NULL);
+		
+		return dt_reg->encoder;
+	}
+	else{
+		static REHex::CharacterEncoderASCII ascii_encoder;
+		return &ascii_encoder;
+	}
 }
 
 bool REHex::Document::set_virt_mapping(off_t real_offset, off_t virt_offset, off_t length)

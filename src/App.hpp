@@ -179,6 +179,9 @@ namespace REHex {
 					SetupHookRegistration &operator=(const SetupHookRegistration &rhs) = delete;
 			};
 			
+			int get_caret_on_time_ms();
+			int get_caret_off_time_ms();
+			
 			virtual bool OnInit();
 			virtual int OnExit();
 			
@@ -189,6 +192,9 @@ namespace REHex {
 			
 			static std::multimap<SetupPhase, const SetupHookFunction*> *setup_hooks;
 			void call_setup_hooks(SetupPhase phase);
+			
+		public:
+			void _test_setup_hooks(SetupPhase phase);
 	};
 }
 

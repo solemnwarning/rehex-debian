@@ -28,15 +28,10 @@
 #include "App.hpp"
 #include "DataType.hpp"
 #include "DiffWindow.hpp"
+#include "CharacterEncoder.hpp"
 #include "EditCommentDialog.hpp"
 #include "Tab.hpp"
 #include "VirtualMappingDialog.hpp"
-
-/* Is the given byte a printable 7-bit ASCII character? */
-static bool isasciiprint(int c)
-{
-	return (c >= ' ' && c <= '~');
-}
 
 /* Is the given value a 7-bit ASCII character representing a hex digit? */
 static bool isasciihex(int c)
@@ -432,13 +427,51 @@ void REHex::Tab::paste_text(const std::string &text)
 		}
 	};
 	
+	auto paste_text = [this](const std::string &utf8_text)
+	{
+		off_t cursor_pos = doc_ctrl->get_cursor_position();
+		bool insert_mode = doc_ctrl->get_insert_mode();
+		
+		off_t selection_off, selection_length;
+		std::tie(selection_off, selection_length) = doc_ctrl->get_selection_linear();
+		bool has_selection = doc_ctrl->has_selection();
+		
+		int write_flag;
+		
+		if(selection_length > 0)
+		{
+			/* Some data is selected, replace it. */
+			
+			write_flag = doc->replace_text(selection_off, selection_length, utf8_text, Document::WRITE_TEXT_GOTO_NEXT, Document::CSTATE_GOTO, "paste");
+			doc_ctrl->clear_selection();
+		}
+		else if(has_selection)
+		{
+			/* Nonlinear selection. */
+			write_flag = Document::WRITE_TEXT_BAD_OFFSET;
+		}
+		else if(insert_mode)
+		{
+			/* We are in insert mode, insert at the cursor. */
+			write_flag = doc->insert_text(cursor_pos, utf8_text, Document::WRITE_TEXT_GOTO_NEXT, Document::CSTATE_GOTO, "paste");
+		}
+		else{
+			/* We are in overwrite mode, overwrite up to the end of the file. */
+			write_flag = doc->overwrite_text(cursor_pos, utf8_text, Document::WRITE_TEXT_GOTO_NEXT, Document::CSTATE_GOTO, "paste");
+		}
+		
+		if(write_flag != Document::WRITE_TEXT_OK)
+		{
+			wxBell();
+		}
+	};
+	
 	Document::CursorState cursor_state = doc_ctrl->get_cursor_state();
 	
 	if(cursor_state == Document::CSTATE_ASCII)
 	{
 		/* Paste into ASCII view, handle as string of characters. */
-		
-		paste_data((const unsigned char*)(text.data()), text.size());
+		paste_text(text);
 	}
 	else{
 		/* Paste into hex view, handle as hex string of bytes. */
@@ -452,6 +485,60 @@ void REHex::Tab::paste_text(const std::string &text)
 			/* Ignore paste if clipboard didn't contain a valid hex string. */
 		}
 	}
+}
+
+void REHex::Tab::compare_whole_file()
+{
+	compare_range(0, doc->buffer_length());
+}
+
+void REHex::Tab::compare_selection()
+{
+	off_t selection_off, selection_length;
+	std::tie(selection_off, selection_length) = doc_ctrl->get_selection_linear();
+	
+	if(selection_length > 0)
+	{
+		compare_range(selection_off, selection_length);
+	}
+	else{
+		wxBell();
+	}
+}
+
+void REHex::Tab::compare_range(off_t offset, off_t length)
+{
+	static DiffWindow *diff_window = NULL;
+	if(diff_window == NULL)
+	{
+		/* Parent DiffWindow to our parent so it can outlive us but not the MainWindow. */
+		diff_window = new DiffWindow(GetParent());
+		
+		diff_window->Bind(wxEVT_DESTROY, [](wxWindowDestroyEvent &event)
+		{
+			if(event.GetWindow() == diff_window)
+			{
+				diff_window = NULL;
+			}
+		});
+		
+		diff_window->Show(true);
+	}
+	
+	diff_window->add_range(DiffWindow::Range(doc, doc_ctrl, offset, length));
+	
+	/* Raise the DiffWindow to the top of the Z order sometime after the
+	 * current event has been processed, else the menu/mouse event handling
+	 * will interfere and move the MainWindow back to the top.
+	*/
+	CallAfter([]()
+	{
+		if(diff_window != NULL)
+		{
+			diff_window->Iconize(false);
+			diff_window->Raise();
+		}
+	});
 }
 
 REHex::InlineCommentMode REHex::Tab::get_inline_comment_mode() const
@@ -593,6 +680,7 @@ void REHex::Tab::OnDocumentCtrlChar(wxKeyEvent &event)
 	}
 	
 	int key       = event.GetKeyCode();
+	wxChar ukey   = event.GetUnicodeKey();
 	int modifiers = event.GetModifiers();
 	
 	off_t cursor_pos = doc_ctrl->get_cursor_position();
@@ -652,23 +740,18 @@ void REHex::Tab::OnDocumentCtrlChar(wxKeyEvent &event)
 		
 		return;
 	}
-	else if(doc_ctrl->ascii_view_active() && (modifiers == wxMOD_NONE || modifiers == wxMOD_SHIFT) && isasciiprint(key))
+	else if(doc_ctrl->ascii_view_active() && (modifiers == wxMOD_NONE || modifiers == wxMOD_SHIFT) && ukey != WXK_NONE)
 	{
-		unsigned char byte = key;
+		wxCharBuffer utf8_buf = wxString(wxUniChar(ukey)).utf8_str();
+		std::string utf8_key(utf8_buf.data(), utf8_buf.length());
 		
 		if(insert_mode)
 		{
-			doc->insert_data(cursor_pos, &byte, 1, cursor_pos + 1, Document::CSTATE_ASCII, "change data");
+			doc->insert_text(cursor_pos, utf8_key, Document::WRITE_TEXT_GOTO_NEXT, Document::CSTATE_ASCII);
 		}
-		else if(cursor_pos < doc->buffer_length())
-		{
-			std::vector<unsigned char> cur_data = doc->read_data(cursor_pos, 1);
-			assert(cur_data.size() == 1);
-			
-			doc->overwrite_data(cursor_pos, &byte, 1, cursor_pos + 1, Document::CSTATE_ASCII, "change data");
+		else{
+			doc->overwrite_text(cursor_pos, utf8_key, Document::WRITE_TEXT_GOTO_NEXT, Document::CSTATE_ASCII);
 		}
-		
-		doc_ctrl->clear_selection();
 		
 		return;
 	}
@@ -973,6 +1056,8 @@ void REHex::Tab::OnDataRightClick(wxCommandEvent &event)
 		auto selection_off_type = data_types.get_range(selection_off);
 		assert(selection_off_type != data_types.end());
 		
+		/* "Set data type" > */
+		
 		wxMenu *dtmenu = new wxMenu();
 		
 		wxMenuItem *data_itm = dtmenu->AppendCheckItem(wxID_ANY, "Data");
@@ -996,8 +1081,7 @@ void REHex::Tab::OnDataRightClick(wxCommandEvent &event)
 		
 		std::vector<const DataTypeRegistration*> sorted_dts = DataTypeRegistry::sorted_by_group();
 		
-		wxMenu *group_menu = dtmenu;
-		wxMenuItem *gm_item = NULL;
+		std::vector< std::pair<std::string, wxMenu*> > group_menus;
 		
 		for(auto dti = sorted_dts.begin(); dti != sorted_dts.end(); ++dti)
 		{
@@ -1009,17 +1093,30 @@ void REHex::Tab::OnDataRightClick(wxCommandEvent &event)
 				continue;
 			}
 			
-			if(!dt->group.empty())
+			wxMenu *group_menu = dtmenu;
+			
 			{
-				if(gm_item == NULL || gm_item->GetItemLabel() != dt->group)
+				auto g = dt->groups.begin();
+				auto p = group_menus.begin();
+				
+				for(; g != dt->groups.end(); ++g, ++p)
 				{
-					group_menu = new wxMenu;
-					gm_item = dtmenu->AppendSubMenu(group_menu, dt->group);
+					if(p == group_menus.end() || p->first != *g)
+					{
+						wxMenu *m = new wxMenu;
+						group_menu->AppendSubMenu(m, *g);
+						group_menu = m;
+						
+						p = group_menus.emplace(p, *g, m);
+					}
+					
+					group_menu = p->second;
 				}
 			}
-			else{
-				group_menu = dtmenu;
-				gm_item = NULL;
+			
+			if(group_menus.size() > dt->groups.size())
+			{
+				group_menus.erase(std::next(group_menus.begin(), dt->groups.size()), group_menus.end());
 			}
 			
 			wxMenuItem *itm = group_menu->AppendCheckItem(wxID_ANY, dt->label);
@@ -1051,44 +1148,15 @@ void REHex::Tab::OnDataRightClick(wxCommandEvent &event)
 		}, vm_itm->GetId(), vm_itm->GetId());
 	}
 	
-	if(selection_length > 0)
+	menu.AppendSeparator();
+	
 	{
-		menu.AppendSeparator();
-		wxMenuItem *itm = menu.Append(wxID_ANY, "Compare...");
+		wxMenuItem *itm = menu.Append(wxID_ANY, "Compare selection...\tCtrl-Shift-K");
+		itm->Enable(selection_length > 0);
 		
-		menu.Bind(wxEVT_MENU, [this, selection_off, selection_length](wxCommandEvent &event)
+		menu.Bind(wxEVT_MENU, [&](wxCommandEvent &event)
 		{
-			static DiffWindow *diff_window = NULL;
-			if(diff_window == NULL)
-			{
-				/* Parent DiffWindow to our parent so it can outlive us but not the MainWindow. */
-				diff_window = new DiffWindow(GetParent());
-				
-				diff_window->Bind(wxEVT_DESTROY, [](wxWindowDestroyEvent &event)
-				{
-					if(event.GetWindow() == diff_window)
-					{
-						diff_window = NULL;
-					}
-				});
-				
-				diff_window->Show(true);
-			}
-			
-			diff_window->add_range(DiffWindow::Range(doc, doc_ctrl, selection_off, selection_length));
-			
-			/* Raise the DiffWindow to the top of the Z order sometime after the
-			 * current event has been processed, else the menu/mouse event handling
-			 * will interfere and move the MainWindow back to the top.
-			*/
-			CallAfter([]()
-			{
-				if(diff_window != NULL)
-				{
-					diff_window->Iconize(false);
-					diff_window->Raise();
-				}
-			});
+			compare_range(selection_off, selection_length);
 		}, itm->GetId(), itm->GetId());
 	}
 	
