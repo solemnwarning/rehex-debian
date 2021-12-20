@@ -30,6 +30,7 @@
 #include "buffer.hpp"
 #include "ByteRangeMap.hpp"
 #include "ByteRangeSet.hpp"
+#include "CharacterEncoder.hpp"
 #include "NestedOffsetLengthMap.hpp"
 #include "util.hpp"
 
@@ -151,6 +152,11 @@ namespace REHex {
 			*/
 			bool is_byte_dirty(off_t offset) const;
 			
+			/**
+			 * @brief Check if the BUFFER has any pending changes to be saved.
+			*/
+			bool is_buffer_dirty() const;
+			
 			off_t get_cursor_position() const;
 			CursorState get_cursor_state() const;
 			void set_cursor_position(off_t off, CursorState cursor_state = CSTATE_GOTO);
@@ -238,6 +244,8 @@ namespace REHex {
 			*/
 			bool set_data_type(off_t offset, off_t length, const std::string &type);
 			
+			const CharacterEncoder *get_text_encoder(off_t offset) const;
+			
 			bool set_virt_mapping(off_t real_offset, off_t virt_offset, off_t length);
 			void clear_virt_mapping_r(off_t real_offset, off_t length);
 			void clear_virt_mapping_v(off_t virt_offset, off_t length);
@@ -318,8 +326,10 @@ namespace REHex {
 			
 			Buffer *buffer;
 			std::string filename;
+			bool write_protect;
 			
 			unsigned int current_seq;
+			unsigned int buffer_seq;
 			ByteRangeMap<unsigned int> data_seq;
 			unsigned int saved_seq;
 			
@@ -396,6 +406,19 @@ namespace REHex {
 			off_t buffer_length() const;
 			
 			/**
+			 * @brief Set write protect flag on the file.
+			 *
+			 * If the write protect flag is set, any attempts to modify the file (buffer) DATA
+			 * will be no-ops. Changes to metadata (comments, etc) are still permitted.
+			*/
+			void set_write_protect(bool write_protect);
+			
+			/**
+			 * @get Get the write protect flag state.
+			*/
+			bool get_write_protect() const;
+			
+			/**
 			 * @brief Overwrite a range of bytes in the file.
 			 *
 			 * @param offset            File offset to write data at.
@@ -417,7 +440,7 @@ namespace REHex {
 			 * @param new_cursor_state  New cursor state. Pass CSTATE_CURRENT to not change the cursor state.
 			 * @param change_desc       Description of change for undo history.
 			*/
-			void insert_data(off_t offset, const unsigned char *data, off_t length,                                      off_t new_cursor_pos = -1, CursorState new_cursor_state = CSTATE_CURRENT, const char *change_desc = "change data");
+			void insert_data(off_t offset, const void *data, off_t length,                                      off_t new_cursor_pos = -1, CursorState new_cursor_state = CSTATE_CURRENT, const char *change_desc = "change data");
 			
 			/**
 			 * @brief Erase a range of bytes in the file.
@@ -441,7 +464,19 @@ namespace REHex {
 			 * @param new_cursor_state  New cursor state. Pass CSTATE_CURRENT to not change the cursor state.
 			 * @param change_desc       Description of change for undo history.
 			*/
-			void replace_data(off_t offset, off_t old_data_length, const unsigned char *new_data, off_t new_data_length, off_t new_cursor_pos = -1, CursorState new_cursor_state = CSTATE_CURRENT, const char *change_desc = "change data");
+			void replace_data(off_t offset, off_t old_data_length, const void *new_data, off_t new_data_length, off_t new_cursor_pos = -1, CursorState new_cursor_state = CSTATE_CURRENT, const char *change_desc = "change data");
+			
+			static const off_t WRITE_TEXT_KEEP_POSITION = -1;  /**< Don't move the cursor after writing. */
+			static const off_t WRITE_TEXT_GOTO_NEXT = -2;      /**< Jump to byte following written data. */
+			
+			static const int WRITE_TEXT_OK = 0;
+			static const int WRITE_TEXT_BAD_OFFSET = 1;
+			static const int WRITE_TEXT_SKIPPED = 2;
+			static const int WRITE_TEXT_TRUNCATED = 4;
+			
+			int overwrite_text(off_t offset, const std::string &utf8_text, off_t new_cursor_pos = WRITE_TEXT_GOTO_NEXT, CursorState new_cursor_state = CSTATE_CURRENT, const char *change_desc = "change data");
+			int insert_text(off_t offset, const std::string &utf8_text, off_t new_cursor_pos = WRITE_TEXT_GOTO_NEXT, CursorState new_cursor_state = CSTATE_CURRENT, const char *change_desc = "change data");
+			int replace_text(off_t offset, off_t old_data_length, const std::string &utf8_text, off_t new_cursor_pos = WRITE_TEXT_GOTO_NEXT, CursorState new_cursor_state = CSTATE_CURRENT, const char *change_desc = "change data");
 			
 			void transact_begin(const std::string &desc);
 			void transact_commit();
