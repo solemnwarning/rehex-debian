@@ -249,6 +249,7 @@ tests/stub-plugin.lua
 tests/util.cpp
 tools/embed.cpp
 tools/gtk-config.cpp
+tools/mac-build-dependencies.sh
 update-wxlua.sh
 vcpkg/install_vcpkg_dependencies.bat
 vcpkg/thirdparty.props
