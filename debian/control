@@ -8,12 +8,14 @@ Build-Depends:
  libjansson-dev,
  libwxgtk3.0-gtk3-dev,
  liblua5.3-dev,
+ libtemplate-perl,
  libunistring-dev,
  lua5.3,
  pkg-config,
  xauth,
  xvfb,
  wx3.0-headers,
+ zip,
  zlib1g-dev
 Standards-Version: 3.9.4
 Section: editors
