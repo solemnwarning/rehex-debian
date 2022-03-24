@@ -10,6 +10,7 @@ Build-Depends:
  liblua5.3-dev,
  libtemplate-perl,
  libunistring-dev,
+ lua-busted,
  lua5.3,
  pkg-config,
  xauth,
