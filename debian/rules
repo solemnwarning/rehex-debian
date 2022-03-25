@@ -24,4 +24,4 @@ endif
 	dh $@
 
 override_dh_auto_test:
-	xvfb-run -a -e /dev/stdout make $(MAKE_J_FLAG) check
+	xvfb-run -a -e /dev/stdout make $(MAKE_J_FLAG) LUA=lua5.3 check
