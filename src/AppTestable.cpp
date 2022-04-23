@@ -1,5 +1,5 @@
 /* Reverse Engineer's Hex Editor
- * Copyright (C) 2017-2021 Daniel Collins <solemnwarning@solemnwarning.net>
+ * Copyright (C) 2017-2022 Daniel Collins <solemnwarning@solemnwarning.net>
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 as published by
@@ -231,6 +231,91 @@ void REHex::App::call_setup_hooks(SetupPhase phase)
 	}
 }
 
+REHex::HelpController *REHex::App::get_help_controller(wxWindow *error_parent)
+{
+	if(help_controller == NULL)
+	{
+		help_controller = new HelpController;
+	}
+	
+	if(help_controller != NULL && !help_loaded)
+	{
+		#if defined(_WIN32)
+		wxString chm_path = wxStandardPaths::Get().GetResourcesDir() + "/rehex.chm";
+		
+		/* Delete the "Zone.Identifier" NTFS alternate stream if present on the help file.
+		 *
+		 * The Zone.Identifier stream is added for files that come from an untrusted
+		 * source (like the Internet) and causes Windows to restrict access to them. In
+		 * particular, the help viewer will display a blank page with no explanation as to
+		 * why if this isn't done.
+		 *
+		 * The "Unblock" tickbox under the file's Properties dialog does the same thing.
+		*/
+		DeleteFile((chm_path + ":Zone.Identifier").wc_str());
+		
+		help_loaded = help_controller->Initialize(chm_path);
+		
+		#elif defined(__APPLE__)
+		help_loaded = help_controller->AddBook(wxStandardPaths::Get().GetResourcesDir() + "/rehex.htb", false);
+		
+		#elif defined(REHEX_APPIMAGE)
+		const char *APPDIR = getenv("APPDIR");
+		if(APPDIR != NULL)
+		{
+			help_loaded = help_controller->AddBook(std::string(APPDIR) + "/" + REHEX_DATADIR + "/rehex/rehex.htb");
+		}
+		
+		#else /* Linux/UNIX */
+		help_loaded = help_controller->AddBook(std::string(REHEX_DATADIR) + "/rehex/rehex.htb");
+		#endif
+	}
+	
+	if(!help_loaded)
+	{
+		wxMessageBox("Unable to load help file", "Error", wxOK | wxICON_ERROR, error_parent);
+		return NULL;
+	}
+	
+	return help_controller;
+}
+
+void REHex::App::show_help_contents(wxWindow *error_parent)
+{
+	HelpController *help = get_help_controller(error_parent);
+	if(help)
+	{
+		#ifndef _WIN32
+		wxHtmlHelpWindow *help_window = help_controller->GetHelpWindow();
+		#endif
+		
+		help->DisplayContents();
+		
+		#ifndef _WIN32
+		if(help_window == NULL)
+		{
+			help_window = help_controller->GetHelpWindow();
+			assert(help_window != NULL);
+			
+			help_window->Bind(wxEVT_HTML_LINK_CLICKED, [&](wxHtmlLinkEvent &event)
+			{
+				const wxHtmlLinkInfo &linkinfo = event.GetLinkInfo();
+				
+				if(linkinfo.GetTarget() == "_blank")
+				{
+					/* External link - display it in the web browser. */
+					wxLaunchDefaultBrowser(linkinfo.GetHref());
+				}
+				else{
+					/* Internal link - let the help viewer deal with it. */
+					event.Skip();
+				}
+			});
+		}
+		#endif
+	}
+}
+
 REHex::App::SetupHookRegistration::SetupHookRegistration(SetupPhase phase, const SetupHookFunction &func):
 	phase(phase),
 	func(func)
@@ -330,5 +415,17 @@ int REHex::App::get_caret_on_time_ms()
 int REHex::App::get_caret_off_time_ms()
 {
 	return FALLBACK_CARET_BLINK;
+}
+#endif
+
+#ifdef __APPLE__
+void REHex::App::MacOpenFiles(const wxArrayString &filenames)
+{
+	size_t n_files = filenames.GetCount();
+	
+	for(size_t i = 0; i < n_files; ++i)
+	{
+		window->open_file(filenames[i].ToStdString());
+	}
 }
 #endif
