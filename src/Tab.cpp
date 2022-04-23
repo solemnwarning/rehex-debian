@@ -1,5 +1,5 @@
 /* Reverse Engineer's Hex Editor
- * Copyright (C) 2017-2021 Daniel Collins <solemnwarning@solemnwarning.net>
+ * Copyright (C) 2017-2022 Daniel Collins <solemnwarning@solemnwarning.net>
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 as published by
@@ -132,9 +132,9 @@ REHex::Tab::Tab(wxWindow *parent):
 	});
 }
 
-REHex::Tab::Tab(wxWindow *parent, const std::string &filename):
+REHex::Tab::Tab(wxWindow *parent, SharedDocumentPointer &document):
 	wxPanel(parent),
-	doc(SharedDocumentPointer::make(filename)),
+	doc(document),
 	inline_comment_mode(ICM_FULL_INDENT),
 	document_display_mode(DDM_NORMAL),
 	vtools_adjust_pending(false),
@@ -508,24 +508,14 @@ void REHex::Tab::compare_selection()
 
 void REHex::Tab::compare_range(off_t offset, off_t length)
 {
-	static DiffWindow *diff_window = NULL;
-	if(diff_window == NULL)
+	if(DiffWindow::instance == NULL)
 	{
 		/* Parent DiffWindow to our parent so it can outlive us but not the MainWindow. */
-		diff_window = new DiffWindow(GetParent());
-		
-		diff_window->Bind(wxEVT_DESTROY, [](wxWindowDestroyEvent &event)
-		{
-			if(event.GetWindow() == diff_window)
-			{
-				diff_window = NULL;
-			}
-		});
-		
-		diff_window->Show(true);
+		DiffWindow::instance = new DiffWindow(GetParent());
+		DiffWindow::instance->Show(true);
 	}
 	
-	diff_window->add_range(DiffWindow::Range(doc, doc_ctrl, offset, length));
+	DiffWindow::instance->add_range(DiffWindow::Range(doc, doc_ctrl, offset, length));
 	
 	/* Raise the DiffWindow to the top of the Z order sometime after the
 	 * current event has been processed, else the menu/mouse event handling
@@ -533,10 +523,10 @@ void REHex::Tab::compare_range(off_t offset, off_t length)
 	*/
 	CallAfter([]()
 	{
-		if(diff_window != NULL)
+		if(DiffWindow::instance != NULL)
 		{
-			diff_window->Iconize(false);
-			diff_window->Raise();
+			DiffWindow::instance->Iconize(false);
+			DiffWindow::instance->Raise();
 		}
 	});
 }
@@ -1003,7 +993,21 @@ void REHex::Tab::OnDataRightClick(wxCommandEvent &event)
 		
 		for(int i = 0; i < Palette::NUM_HIGHLIGHT_COLOURS; ++i)
 		{
-			wxMenuItem *itm = new wxMenuItem(hlmenu, wxID_ANY, " ");
+			/* Hardcoded list of names for the highlight colours.
+			 * This will need to be done better soon... but for now all the highlight
+			 * colours used in each pallette are the same and we don't have any more
+			 * specific names for them (#60).
+			*/
+			static const char *highlight_strings[] = {
+				"Red",
+				"Orange",
+				"Yellow",
+				"Green",
+				"Violet",
+				"Grey",
+			};
+			
+			wxMenuItem *itm = new wxMenuItem(hlmenu, wxID_ANY, highlight_strings[i]);
 			
 			wxColour bg_colour = active_palette->get_highlight_bg(i);
 			

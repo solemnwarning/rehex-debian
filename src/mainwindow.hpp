@@ -1,5 +1,5 @@
 /* Reverse Engineer's Hex Editor
- * Copyright (C) 2017-2021 Daniel Collins <solemnwarning@solemnwarning.net>
+ * Copyright (C) 2017-2022 Daniel Collins <solemnwarning@solemnwarning.net>
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 as published by
@@ -46,7 +46,9 @@ namespace REHex {
 			/**
 			 * @brief Create a new tab with a file loaded from disk.
 			*/
-			void open_file(const std::string &filename);
+			Tab *open_file(const std::string &filename);
+			
+			Tab *import_hex_file(const std::string &filename);
 			
 			wxMenuBar *get_menu_bar() const;
 			wxMenu *get_file_menu() const;
@@ -78,6 +80,8 @@ namespace REHex {
 			void OnRecentOpen(wxCommandEvent &event);
 			void OnSave(wxCommandEvent &event);
 			void OnSaveAs(wxCommandEvent &event);
+			void OnImportHex(wxCommandEvent &event);
+			void OnExportHex(wxCommandEvent &event);
 			void OnClose(wxCommandEvent &event);
 			void OnCloseAll(wxCommandEvent &event);
 			void OnCloseOthers(wxCommandEvent &event);
@@ -107,6 +111,7 @@ namespace REHex {
 			void OnShowOffsets(wxCommandEvent &event);
 			void OnShowASCII(wxCommandEvent &event);
 			void OnInlineCommentsMode(wxCommandEvent &event);
+			void OnAsmSyntax(wxCommandEvent &event);
 			void OnDocumentDisplayMode(wxCommandEvent &event);
 			void OnHighlightSelectionMatch(wxCommandEvent &event);
 			void OnShowToolPanel(wxCommandEvent &event, const REHex::ToolPanelRegistration *tpr);
@@ -119,6 +124,7 @@ namespace REHex {
 			
 			void OnGithub(wxCommandEvent &event);
 			void OnDonate(wxCommandEvent &event);
+			void OnHelp(wxCommandEvent &event);
 			void OnAbout(wxCommandEvent &event);
 			
 			void OnDocumentChange(wxAuiNotebookEvent &event);
@@ -243,6 +249,7 @@ namespace REHex {
 			std::map<std::string, int> tool_panel_name_to_tpm_id;
 			
 			wxMenu *inline_comments_menu;
+			wxMenu *asm_syntax_menu;
 			
 			void _update_status_offset(Tab *tab);
 			void _update_status_selection(REHex::DocumentCtrl *doc_ctrl);
