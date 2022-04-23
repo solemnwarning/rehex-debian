@@ -1,5 +1,5 @@
 # Reverse Engineer's Hex Editor
-# Copyright (C) 2017-2021 Daniel Collins <solemnwarning@solemnwarning.net>
+# Copyright (C) 2017-2022 Daniel Collins <solemnwarning@solemnwarning.net>
 #
 # This program is free software; you can redistribute it and/or modify it
 # under the terms of the GNU General Public License version 2 as published by
@@ -32,20 +32,36 @@ shell-or-die = $\
 		$(wordlist 1, $(shell echo $$(($(words $(sod_out)) - 1))), $(sod_out)),$\
 		$(error $(1) exited with status $(lastword $(sod_out))))
 
-WX_CXXFLAGS ?= $(call shell-or-die,$(WX_CONFIG) --cxxflags base core aui propgrid adv)
-WX_LIBS     ?= $(call shell-or-die,$(WX_CONFIG) --libs     base core aui propgrid adv)
+# Check if we are building target(s) that don't need to compile anything and
+# skip fetching compiler flags from wx-config/pkg-config/etc if so, this avoids
+# having to have our dependencies on build hosts that are going to use a chroot
+# or other container for doing the actual build.
 
-CAPSTONE_CFLAGS ?= $(call shell-or-die,pkg-config $(CAPSTONE_PKG) --cflags)
-CAPSTONE_LIBS   ?= $(call shell-or-die,pkg-config $(CAPSTONE_PKG) --libs)
+NONCOMPILE_TARGETS=clean distclean dist
 
-JANSSON_CFLAGS ?= $(call shell-or-die,pkg-config $(JANSSON_PKG) --cflags)
-JANSSON_LIBS   ?= $(call shell-or-die,pkg-config $(JANSSON_PKG) --libs)
+need_compiler_flags=1
+ifneq ($(MAKECMDGOALS),)
+	ifeq ($(filter-out $(NONCOMPILE_TARGETS),$(MAKECMDGOALS)),)
+		need_compiler_flags=0
+	endif
+endif
 
-LUA_CFLAGS ?= $(call shell-or-die,pkg-config $(LUA_PKG) --cflags)
-LUA_LIBS   ?= $(call shell-or-die,pkg-config $(LUA_PKG) --libs)
-
-GTK_CFLAGS = $$($(GTKCONFIG_EXE) --cflags)
-GTK_LIBS   = $$($(GTKCONFIG_EXE) --libs)
+ifeq ($(need_compiler_flags),1)
+	WX_CXXFLAGS ?= $(call shell-or-die,$(WX_CONFIG) --cxxflags base core aui propgrid adv html)
+	WX_LIBS     ?= $(call shell-or-die,$(WX_CONFIG) --libs     base core aui propgrid adv html)
+	
+	CAPSTONE_CFLAGS ?= $(call shell-or-die,pkg-config $(CAPSTONE_PKG) --cflags)
+	CAPSTONE_LIBS   ?= $(call shell-or-die,pkg-config $(CAPSTONE_PKG) --libs)
+	
+	JANSSON_CFLAGS ?= $(call shell-or-die,pkg-config $(JANSSON_PKG) --cflags)
+	JANSSON_LIBS   ?= $(call shell-or-die,pkg-config $(JANSSON_PKG) --libs)
+	
+	LUA_CFLAGS ?= $(call shell-or-die,pkg-config $(LUA_PKG) --cflags)
+	LUA_LIBS   ?= $(call shell-or-die,pkg-config $(LUA_PKG) --libs)
+	
+	GTK_CFLAGS = $$($(GTKCONFIG_EXE) --cflags)
+	GTK_LIBS   = $$($(GTKCONFIG_EXE) --libs)
+endif
 
 ifeq ($(DEBUG),)
 	DEBUG=0
@@ -72,7 +88,7 @@ endif
 LDLIBS := -lunistring $(WX_LIBS) $(GTK_LIBS) $(CAPSTONE_LIBS) $(JANSSON_LIBS) $(LUA_LIBS) $(LDLIBS)
 
 # Define this for releases
-VERSION := 0.4.1
+VERSION := 0.5.0
 
 ifdef VERSION
 	LONG_VERSION := Version $(VERSION)
@@ -88,8 +104,8 @@ else
 	
 	GIT_COMMIT_TIME ?= $(call shell-or-die,git log -1 --format="%ct")
 	
-	VERSION      := 185c5df53fffdb6ea3625820fa3e3c6c35d57f2b
-	LONG_VERSION := Snapshot 185c5df53fffdb6ea3625820fa3e3c6c35d57f2b
+	VERSION      := 6000d718bba6527bb892211a2e119e94d11d8563
+	LONG_VERSION := Snapshot 6000d718bba6527bb892211a2e119e94d11d8563
 endif
 
 DEPDIR := .d
@@ -111,6 +127,11 @@ all: $(EXE)
 .PHONY: check
 check: tests/all-tests
 	./tests/all-tests
+	
+	for p in $(PLUGINS); \
+	do \
+		$(MAKE) -C plugins/$${p} LUA=$(LUA) check || exit $$?; \
+	done
 
 .PHONY: clean
 clean:
@@ -193,6 +214,7 @@ WXBIND_OBJS := \
 	wxLua/modules/wxbind/src/wxpropgrid_bind.o
 
 APP_OBJS := \
+	res/actual_size16.o \
 	res/ascii16.o \
 	res/ascii24.o \
 	res/ascii32.o \
@@ -201,6 +223,7 @@ APP_OBJS := \
 	res/diff_fold24.o \
 	res/diff_fold32.o \
 	res/diff_fold48.o \
+	res/fit_to_screen16.o \
 	res/icon16.o \
 	res/icon32.o \
 	res/icon48.o \
@@ -212,11 +235,17 @@ APP_OBJS := \
 	res/offsets32.o \
 	res/offsets48.o \
 	res/spinner24.o \
+	res/swap_horiz16.o \
+	res/swap_vert16.o \
+	res/zoom_in16.o \
+	res/zoom_out16.o \
 	src/AboutDialog.o \
 	src/AppMain.o \
+	src/AppSettings.o \
 	src/AppTestable.o \
 	src/ArtProvider.o \
 	src/BasicDataTypes.o \
+	src/BitmapTool.o \
 	src/buffer.o \
 	src/BytesPerLineDialog.o \
 	src/ByteRangeSet.o \
@@ -236,6 +265,8 @@ APP_OBJS := \
 	src/EditCommentDialog.o \
 	src/Events.o \
 	src/FillRangeDialog.o \
+	src/IntelHexExport.o \
+	src/IntelHexImport.o \
 	src/LicenseDialog.o \
 	src/lua-bindings/rehex_bind.o \
 	src/lua-plugin-preload.o \
@@ -257,11 +288,12 @@ APP_OBJS := \
 	$(EXTRA_APP_OBJS)
 
 $(EXE): $(APP_OBJS) $(GTKCONFIG_EXE)
-	$(CXX) $(CXXFLAGS) -DLONG_VERSION='"$(LONG_VERSION)"' -DLIBDIR='"$(libdir)"' -c -o res/version.o res/version.cpp
+	$(CXX) $(CXXFLAGS) -DLONG_VERSION='"$(LONG_VERSION)"' -DLIBDIR='"$(libdir)"' -DDATADIR='"$(datadir)"' -c -o res/version.o res/version.cpp
 	$(CXX) $(CXXFLAGS) -o $@ $(APP_OBJS) res/version.o $(LDFLAGS) $(LDLIBS)
 
 TEST_OBJS := \
 	googletest/src/gtest-all.o \
+	res/actual_size16.o \
 	res/ascii16.o \
 	res/ascii24.o \
 	res/ascii32.o \
@@ -270,6 +302,7 @@ TEST_OBJS := \
 	res/diff_fold24.o \
 	res/diff_fold32.o \
 	res/diff_fold48.o \
+	res/fit_to_screen16.o \
 	res/icon16.o \
 	res/icon32.o \
 	res/icon48.o \
@@ -281,10 +314,16 @@ TEST_OBJS := \
 	res/offsets32.o \
 	res/offsets48.o \
 	res/spinner24.o \
+	res/swap_horiz16.o \
+	res/swap_vert16.o \
+	res/zoom_in16.o \
+	res/zoom_out16.o \
 	src/AboutDialog.o \
+	src/AppSettings.o \
 	src/AppTestable.o \
 	src/ArtProvider.o \
 	src/BasicDataTypes.o \
+	src/BitmapTool.o \
 	src/buffer.o \
 	src/ByteRangeSet.o \
 	src/BytesPerLineDialog.o \
@@ -300,6 +339,8 @@ TEST_OBJS := \
 	src/EditCommentDialog.o \
 	src/Events.o \
 	src/FillRangeDialog.o \
+	src/IntelHexExport.o \
+	src/IntelHexImport.o \
 	src/LicenseDialog.o \
 	src/lua-bindings/rehex_bind.o \
 	src/lua-plugin-preload.o \
@@ -315,6 +356,7 @@ TEST_OBJS := \
 	src/util.o \
 	src/VirtualMappingDialog.o \
 	src/win32lib.o \
+	tests/BitmapTool.o \
 	tests/buffer.o \
 	tests/ByteRangeMap.o \
 	tests/ByteRangeSet.o \
@@ -326,6 +368,8 @@ TEST_OBJS := \
 	tests/DisassemblyRegion.o \
 	tests/Document.o \
 	tests/DocumentCtrl.o \
+	tests/IntelHexExport.o \
+	tests/IntelHexImport.o \
 	tests/LuaPluginLoader.o \
 	tests/main.o \
 	tests/NestedOffsetLengthMap.o \
@@ -338,13 +382,14 @@ TEST_OBJS := \
 	tests/SharedDocumentPointer.o \
 	tests/StringPanel.o \
 	tests/Tab.o \
+	tests/testutil.o \
 	tests/util.o \
 	$(WXLUA_OBJS) \
 	$(WXBIND_OBJS) \
 	$(EXTRA_TEST_OBJS)
 
 tests/all-tests: $(TEST_OBJS) $(GTKCONFIG_EXE)
-	$(CXX) $(CXXFLAGS) -DLONG_VERSION='"$(LONG_VERSION)"' -DLIBDIR='"$(libdir)"' -c -o res/version.o res/version.cpp
+	$(CXX) $(CXXFLAGS) -DLONG_VERSION='"$(LONG_VERSION)"' -DLIBDIR='"$(libdir)"' -DDATADIR='"$(datadir)"' -c -o res/version.o res/version.cpp
 	$(CXX) $(CXXFLAGS) -o $@ $(TEST_OBJS) res/version.o $(LDFLAGS) $(LDLIBS)
 
 $(EMBED_EXE): tools/embed.cpp
@@ -358,6 +403,9 @@ src/ArtProvider.o: \
 	res/ascii16.h res/ascii24.h res/ascii32.h res/ascii48.h \
 	res/diff_fold16.h res/diff_fold24.h res/diff_fold32.h res/diff_fold48.h \
 	res/offsets16.h res/offsets24.h res/offsets32.h res/offsets48.h
+src/BitmapTool.o: \
+	res/actual_size16.h res/fit_to_screen16.h res/swap_horiz16.h \
+	res/swap_vert16.h res/zoom_in16.h res/zoom_out16.h
 src/DiffWindow.o: res/icon16.h res/icon32.h res/icon48.h res/icon64.h
 src/LicenseDialog.o: res/license.h
 src/LuaPluginLoader.o: src/lua-bindings/rehex_bind.h src/lua-plugin-preload.h
@@ -418,28 +466,43 @@ googletest/src/%.o: googletest/src/%.cc $(GTKCONFIG_EXE)
 wxLua/%.cpp: $(WXLUA_BINDINGS)
 	@true
 
+.PHONY: help/rehex.chm
+help/rehex.chm:
+	$(MAKE) -C help/ rehex.chm
+
+rehex.chm: help/rehex.chm
+	cp $< $@
+
+.PHONY: help/rehex.htb
+help/rehex.htb:
+	$(MAKE) -C help/ rehex.htb
+
+.PHONY: online-help
+online-help:
+	$(MAKE) -C help/ online-help
+
 include $(shell test -d .d/ && find .d/ -name '*.d' -type f)
 
 prefix      ?= /usr/local
 exec_prefix ?= $(prefix)
 bindir      ?= $(exec_prefix)/bin
 datarootdir ?= $(prefix)/share
+datadir     ?= $(datarootdir)
 libdir      ?= $(exec_prefix)/lib
 
-PLUGINS_INSTALL := \
-	exe/bitops52.lua \
-	exe/class.lua \
-	exe/document_stream.lua \
-	exe/enum.lua \
-	exe/kaitaistruct.lua \
-	exe/microsoft_pe.lua \
-	exe/plugin.lua \
-	exe/string_decode.lua \
-	exe/string_stream.lua \
-	exe/utils.lua
+export prefix
+export exec_prefix
+export bindir
+export datarootdir
+export datadir
+export libdir
+
+PLUGINS := \
+	binary-template \
+	exe
 
 .PHONY: install
-install: $(EXE)
+install: $(EXE) help/rehex.htb
 	install -D -m 0755 $(EXE) $(DESTDIR)$(bindir)/$(EXE)
 	
 	for s in 16 32 48 64 128 256 512; \
@@ -449,14 +512,18 @@ install: $(EXE)
 	
 	install -D -m 0644 res/rehex.desktop $(DESTDIR)$(datarootdir)/applications/rehex.desktop
 	
-	for f in $(PLUGINS_INSTALL); \
+	install -D -m 0644 help/rehex.htb $(DESTDIR)$(datadir)/rehex/rehex.htb
+	
+	for p in $(PLUGINS); \
 	do \
-		install -D -m 0644 plugins/$${f} $(DESTDIR)$(libdir)/rehex/$${f}; \
+		$(MAKE) -C plugins/$${p} install || exit $$?; \
 	done
 
 .PHONY: uninstall
 uninstall:
 	rm -f $(DESTDIR)$(bindir)/$(EXE)
+	rm -f $(DESTDIR)$(datadir)/rehex/rehex.htb
+	rmdir --ignore-fail-on-non-empty $(DESTDIR)$(datadir)/rehex/
 	rm -f $(DESTDIR)$(datarootdir)/applications/rehex.desktop
 	
 	for s in 16 32 48 64 128 256 512; \
@@ -464,13 +531,10 @@ uninstall:
 		rm -f $(DESTDIR)$(datarootdir)/icons/hicolor/$${s}x$${s}/apps/rehex.png; \
 	done
 	
-	for f in $(PLUGINS_INSTALL); \
+	for p in $(PLUGINS); \
 	do \
-		rm -f $(DESTDIR)$(libdir)/rehex/$${f}; \
+		$(MAKE) -C plugins/$${p} uninstall || exit $$?; \
 	done
-	
-	# Delete any empty directories, preserving plugins we didn't install
-	find $(DESTDIR)$(libdir)/rehex/ -type d -empty -delete
 
 .PHONY: dist
 dist:
@@ -486,8 +550,8 @@ else
 	git ls-files | xargs cp --parents -t rehex-$(VERSION)/
 	
 	# Inline any references to the HEAD commit sha/timestamp
-	sed -i -e "s|\$185c5df53fffdb6ea3625820fa3e3c6c35d57f2b|185c5df53fffdb6ea3625820fa3e3c6c35d57f2b|g" rehex-$(VERSION)/Makefile
-	sed -i -e "s|\$1641225661|1641225661|g" rehex-$(VERSION)/Makefile
+	sed -i -e "s|\$6000d718bba6527bb892211a2e119e94d11d8563|6000d718bba6527bb892211a2e119e94d11d8563|g" rehex-$(VERSION)/Makefile
+	sed -i -e "s|\$1650719202|1650719202|g" rehex-$(VERSION)/Makefile
 endif
 	
 	# Generate reproducible tarball. All files use git commit timestamp.
@@ -495,7 +559,7 @@ endif
 		LC_ALL=C sort -z | \
 		tar \
 			--format=ustar \
-			--mtime=@1641225661 \
+			--mtime=@1650719202 \
 			--owner=0 --group=0 --numeric-owner \
 			--no-recursion --null  -T - \
 			-cf - | \
