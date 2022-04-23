@@ -1,5 +1,5 @@
 /* Reverse Engineer's Hex Editor
- * Copyright (C) 2017-2021 Daniel Collins <solemnwarning@solemnwarning.net>
+ * Copyright (C) 2017-2022 Daniel Collins <solemnwarning@solemnwarning.net>
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 as published by
@@ -134,6 +134,14 @@ void REHex::Document::save(const std::string &filename)
 std::string REHex::Document::get_title()
 {
 	return title;
+}
+
+void REHex::Document::set_title(const std::string &title)
+{
+	this->title = title;
+	
+	DocumentTitleEvent document_title_event(this, title);
+	ProcessEvent(document_title_event);
 }
 
 std::string REHex::Document::get_filename()
@@ -1206,6 +1214,18 @@ const char *REHex::Document::redo_desc()
 	}
 }
 
+void REHex::Document::reset_to_clean()
+{
+	current_seq = 0;
+	buffer_seq = 0;
+	saved_seq = 0;
+	data_seq.set_range(0, buffer->length(), 0);
+	
+	undo_stack.clear();
+	redo_stack.clear();
+	_raise_undo_update();
+}
+
 void REHex::Document::transact_begin(const std::string &desc)
 {
 	if(undo_stack.empty() || undo_stack.back().complete)
@@ -1545,6 +1565,17 @@ json_t *REHex::Document::_dump_metadata(bool& has_data)
 		return NULL;
 	}
 	
+	if(json_object_set_new(root, "write_protect", json_boolean(write_protect)) == -1)
+	{
+		json_decref(root);
+		return NULL;
+	}
+	
+	if(write_protect)
+	{
+		has_data = true;
+	}
+	
 	json_t *comments = json_array();
 	if(json_object_set_new(root, "comments", comments) == -1)
 	{
@@ -1783,6 +1814,9 @@ void REHex::Document::_load_metadata(const std::string &filename)
 	highlights = _load_highlights(meta, buffer_length());
 	types = _load_types(meta, buffer_length());
 	std::tie(real_to_virt_segs, virt_to_real_segs) = _load_virt_mappings(meta, buffer_length());
+	
+	json_t *write_protect = json_object_get(meta, "write_protect");
+	set_write_protect(json_is_true(write_protect));
 	
 	json_decref(meta);
 }
