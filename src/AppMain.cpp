@@ -30,6 +30,7 @@
 #include "DiffWindow.hpp"
 #include "mainwindow.hpp"
 #include "Palette.hpp"
+#include "profile.hpp"
 #include "../res/version.h"
 
 /* These MUST come after any wxWidgets headers. */
@@ -41,8 +42,10 @@ IMPLEMENT_APP(REHex::App);
 
 bool REHex::App::OnInit()
 {
+	#ifdef BUILD_HELP
 	help_controller = NULL;
 	help_loaded = false;
+	#endif
 	
 	locale = new wxLocale(wxLANGUAGE_DEFAULT);
 	console = new ConsoleBuffer();
@@ -217,6 +220,11 @@ bool REHex::App::OnInit()
 		window->new_file();
 	}
 	
+	#ifdef REHEX_PROFILE
+	ProfilingWindow *pw = new ProfilingWindow(window);
+	pw->Show();
+	#endif
+	
 	call_setup_hooks(SetupPhase::DONE);
 	
 	return true;
@@ -232,8 +240,12 @@ int REHex::App::OnExit()
 	config->SetPath("/");
 	config->Write("last-directory", wxString(last_directory));
 	
+	settings->write(config);
+	
 	delete active_palette;
+	#ifdef BUILD_HELP
 	delete help_controller;
+	#endif
 	delete recent_files;
 	delete settings;
 	delete config;

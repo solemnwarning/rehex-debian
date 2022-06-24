@@ -1,5 +1,5 @@
 /* Reverse Engineer's Hex Editor
- * Copyright (C) 2017-2021 Daniel Collins <solemnwarning@solemnwarning.net>
+ * Copyright (C) 2017-2022 Daniel Collins <solemnwarning@solemnwarning.net>
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 as published by
@@ -26,6 +26,7 @@
 #include <map>
 #include <stack>
 #include <string>
+#include <tuple>
 #include <unictype.h>
 #include <unistr.h>
 #include <wx/clipbrd.h>
@@ -37,8 +38,11 @@
 #include "document.hpp"
 #include "DocumentCtrl.hpp"
 #include "Events.hpp"
+#include "FastRectangleFiller.hpp"
 #include "Palette.hpp"
+#include "profile.hpp"
 #include "textentrydialog.hpp"
+#include "UnsortedMapVector.hpp"
 #include "util.hpp"
 
 static_assert(std::numeric_limits<json_int_t>::max() >= std::numeric_limits<off_t>::max(),
@@ -65,6 +69,11 @@ BEGIN_EVENT_TABLE(REHex::DocumentCtrl, wxControl)
 	EVT_IDLE(REHex::DocumentCtrl::OnIdle)
 END_EVENT_TABLE()
 
+static unsigned int pack_colour(const wxColour &colour)
+{
+	return (unsigned int)(colour.Red()) | ((unsigned int)(colour.Blue()) << 8) | ((unsigned int)(colour.Green()) << 16);
+}
+
 REHex::DocumentCtrl::DocumentCtrl(wxWindow *parent, SharedDocumentPointer &doc):
 	wxControl(),
 	doc(doc),
@@ -76,6 +85,14 @@ REHex::DocumentCtrl::DocumentCtrl(wxWindow *parent, SharedDocumentPointer &doc):
 	redraw_cursor_timer(this, ID_REDRAW_CURSOR),
 	mouse_select_timer(this, ID_SELECT_TIMER),
 	hf_gte_cache(GETTEXTEXTENT_CACHE_SIZE)
+
+#ifdef REHEX_CACHE_CHARACTER_BITMAPS
+	,hf_char_bitmap_cache(HF_CHAR_BITMAP_CACHE_SIZE)
+#endif
+
+#ifdef REHEX_CACHE_STRING_BITMAPS
+	,hf_string_bitmap_cache(HF_STRING_BITMAP_CACHE_SIZE)
+#endif
 {
 	App &app = wxGetApp();
 	
@@ -182,6 +199,14 @@ void REHex::DocumentCtrl::OnFontSizeAdjustmentChanged(FontSizeAdjustmentEvent &e
 	}
 	
 	hf_gte_cache.clear();
+
+#ifdef REHEX_CACHE_CHARACTER_BITMAPS
+	hf_char_bitmap_cache.clear();
+#endif
+
+#ifdef REHEX_CACHE_STRING_BITMAPS
+	hf_string_bitmap_cache.clear();
+#endif
 	
 	_handle_width_change();
 	
@@ -444,6 +469,25 @@ void REHex::DocumentCtrl::goto_next_cursor_position()
 	cpos_prev.push_back(get_cursor_position());
 	
 	_set_cursor_position(goto_pos, get_cursor_state(), true);
+}
+
+REHex::DocumentCtrl::GenericDataRegion::ScreenArea REHex::DocumentCtrl::_get_screen_area_for_cursor_state()
+{
+	switch(cursor_state)
+	{
+		case Document::CSTATE_HEX:
+		case Document::CSTATE_HEX_MID:
+			return GenericDataRegion::SA_HEX;
+			
+		case Document::CSTATE_ASCII:
+			return GenericDataRegion::SA_ASCII;
+			
+		case Document::CSTATE_SPECIAL:
+			return GenericDataRegion::SA_SPECIAL;
+			
+		default:
+			return GenericDataRegion::SA_NONE;
+	}
 }
 
 bool REHex::DocumentCtrl::get_insert_mode()
@@ -804,7 +848,7 @@ void REHex::DocumentCtrl::_handle_width_change()
 		 * size is calculated for n+1 characters.
 		*/
 		
-		if(doc->buffer_length() > 0xFFFFFFFF)
+		if(end_virt_offset > 0xFFFFFFFF)
 		{
 			if(offset_display_base == OFFSET_BASE_HEX)
 			{
@@ -1370,7 +1414,7 @@ void REHex::DocumentCtrl::OnChar(wxKeyEvent &event)
 		
 		if(key == WXK_LEFT)
 		{
-			new_cursor_pos = (*cur_region)->cursor_left_from(new_cursor_pos);
+			new_cursor_pos = (*cur_region)->cursor_left_from(new_cursor_pos, _get_screen_area_for_cursor_state());
 			
 			if(new_cursor_pos == GenericDataRegion::CURSOR_PREV_REGION)
 			{
@@ -1396,7 +1440,7 @@ void REHex::DocumentCtrl::OnChar(wxKeyEvent &event)
 		}
 		else if(key == WXK_RIGHT)
 		{
-			new_cursor_pos = (*cur_region)->cursor_right_from(new_cursor_pos);
+			new_cursor_pos = (*cur_region)->cursor_right_from(new_cursor_pos, _get_screen_area_for_cursor_state());
 			
 			if(new_cursor_pos == GenericDataRegion::CURSOR_NEXT_REGION)
 			{
@@ -1425,7 +1469,7 @@ void REHex::DocumentCtrl::OnChar(wxKeyEvent &event)
 		}
 		else if(key == WXK_UP)
 		{
-			new_cursor_pos = (*cur_region)->cursor_up_from(new_cursor_pos);
+			new_cursor_pos = (*cur_region)->cursor_up_from(new_cursor_pos, _get_screen_area_for_cursor_state());
 			
 			if(new_cursor_pos == GenericDataRegion::CURSOR_PREV_REGION)
 			{
@@ -1451,7 +1495,7 @@ void REHex::DocumentCtrl::OnChar(wxKeyEvent &event)
 		}
 		else if(key == WXK_DOWN)
 		{
-			new_cursor_pos = (*cur_region)->cursor_down_from(new_cursor_pos);
+			new_cursor_pos = (*cur_region)->cursor_down_from(new_cursor_pos, _get_screen_area_for_cursor_state());
 			
 			if(new_cursor_pos == GenericDataRegion::CURSOR_NEXT_REGION)
 			{
@@ -1492,7 +1536,7 @@ void REHex::DocumentCtrl::OnChar(wxKeyEvent &event)
 		else if(key == WXK_HOME)
 		{
 			/* Move cursor to start of line. */
-			new_cursor_pos = (*cur_region)->cursor_home_from(new_cursor_pos);
+			new_cursor_pos = (*cur_region)->cursor_home_from(new_cursor_pos, _get_screen_area_for_cursor_state());
 		}
 		else if(key == WXK_END && (modifiers & wxMOD_CONTROL))
 		{
@@ -1514,7 +1558,7 @@ void REHex::DocumentCtrl::OnChar(wxKeyEvent &event)
 		else if(key == WXK_END)
 		{
 			/* Move cursor to end of line. */
-			new_cursor_pos = (*cur_region)->cursor_end_from(new_cursor_pos);
+			new_cursor_pos = (*cur_region)->cursor_end_from(new_cursor_pos, _get_screen_area_for_cursor_state());
 			
 			/* Special case: If "end" is pressed on the last line of the final data
 			 * region when in insert mode, jump past it.
@@ -2028,6 +2072,18 @@ void REHex::DocumentCtrl::OnMotionTick(int mouse_x, int mouse_y)
 					new_sel_end   = mouse_down_at_offset;
 				}
 				
+				GenericDataRegion *end_dr = data_region_by_offset(new_sel_end);
+				assert(end_dr != NULL);
+				
+				off_t end_plus_one = end_dr->cursor_right_from(new_sel_end, mouse_down_area);
+				if(end_plus_one == GenericDataRegion::CURSOR_NEXT_REGION)
+				{
+					new_sel_end = end_dr->d_offset + end_dr->d_length - (off_t)(end_dr->d_length > 0);
+				}
+				else{
+					new_sel_end = end_plus_one - 1;
+				}
+				
 				if(new_sel_begin == new_sel_end && abs(rel_x - mouse_down_at_x) < (hf_char_width() / 2))
 				{
 					clear_selection();
@@ -2146,16 +2202,16 @@ std::vector<REHex::DocumentCtrl::GenericDataRegion*>::iterator REHex::DocumentCt
 	{
 		public:
 			StubRegion(off_t offset):
-				GenericDataRegion(offset, 0, 0) {}
+				GenericDataRegion(offset, 0, 0, 0) {}
 				
 				virtual std::pair<off_t, ScreenArea> offset_at_xy(DocumentCtrl &doc, int mouse_x_px, int64_t mouse_y_lines) override { abort(); }
 				virtual std::pair<off_t, ScreenArea> offset_near_xy(DocumentCtrl &doc, int mouse_x_px, int64_t mouse_y_lines, ScreenArea type_hint) override { abort(); }
-				virtual off_t cursor_left_from(off_t pos) override { abort(); }
-				virtual off_t cursor_right_from(off_t pos) override { abort(); }
-				virtual off_t cursor_up_from(off_t pos) override { abort(); }
-				virtual off_t cursor_down_from(off_t pos) override { abort(); }
-				virtual off_t cursor_home_from(off_t pos) override { abort(); }
-				virtual off_t cursor_end_from(off_t pos) override { abort(); }
+				virtual off_t cursor_left_from(off_t pos, ScreenArea active_type) override { abort(); }
+				virtual off_t cursor_right_from(off_t pos, ScreenArea active_type) override { abort(); }
+				virtual off_t cursor_up_from(off_t pos, ScreenArea active_type) override { abort(); }
+				virtual off_t cursor_down_from(off_t pos, ScreenArea active_type) override { abort(); }
+				virtual off_t cursor_home_from(off_t pos, ScreenArea active_type) override { abort(); }
+				virtual off_t cursor_end_from(off_t pos, ScreenArea active_type) override { abort(); }
 				virtual int cursor_column(off_t pos) override { abort(); }
 				virtual off_t first_row_nearest_column(int column) override { abort(); }
 				virtual off_t last_row_nearest_column(int column) override { abort(); }
@@ -2540,6 +2596,11 @@ bool REHex::DocumentCtrl::get_cursor_visible()
 	return cursor_visible;
 }
 
+off_t REHex::DocumentCtrl::get_end_virt_offset() const
+{
+	return end_virt_offset;
+}
+
 /* Calculate the width of a character in hex_font. */
 int REHex::DocumentCtrl::hf_char_width()
 {
@@ -2588,6 +2649,130 @@ int REHex::DocumentCtrl::hf_char_at_x(int x_px)
 		}
 	}
 }
+
+#ifdef REHEX_CACHE_CHARACTER_BITMAPS
+wxBitmap REHex::DocumentCtrl::hf_char_bitmap(const wxString &wx_char, ucs4_t unicode_char, const wxSize &char_size, const wxColour &foreground_colour, const wxColour &background_colour)
+{
+	PROFILE_BLOCK("REHex::DocumentCtrl::hf_char_bitmap");
+	
+	auto cache_key = std::make_tuple(unicode_char, pack_colour(foreground_colour), pack_colour(background_colour));
+	
+	const wxBitmap *cached_bitmap;
+	{
+		PROFILE_INNER_BLOCK("cache lookup");
+		cached_bitmap = hf_char_bitmap_cache.get(cache_key);
+	}
+	
+	if(cached_bitmap == NULL)
+	{
+		PROFILE_INNER_BLOCK("generate char bitmap");
+		
+		/* I (briefly) tried getting this working with 1bpp bitmaps, but couldn't get the
+		 * background behaving correctly then found this tidbit on the web:
+		 *
+		 * > Support for monochrome bitmaps is very limited in wxWidgets. And
+		 * > wxNativePixelData is designed for 24bit RGB data, so i doubt it will give the
+		 * > expected results for monochrome bitmaps.
+		 * >
+		 * > Even if it's a waste of memory, i would suggest to work with 24bit RGB bitmaps
+		 * > and only at the very end convert it to a 1bit bitmap.
+		 * - https://forums.wxwidgets.org/viewtopic.php?p=185332#p185332
+		*/
+
+		wxBitmap char_bitmap(char_size, wxBITMAP_SCREEN_DEPTH);
+		wxMemoryDC mdc(char_bitmap);
+
+		mdc.SetFont(hex_font);
+
+		mdc.SetBackground(wxBrush(background_colour));
+		mdc.Clear();
+
+		mdc.SetTextForeground(foreground_colour);
+		mdc.SetBackgroundMode(wxTRANSPARENT);
+		mdc.DrawText(wx_char, 0, 0);
+
+		mdc.SelectObject(wxNullBitmap);
+
+		cached_bitmap = hf_char_bitmap_cache.set(cache_key, char_bitmap);
+	}
+
+	/* wxBitmap internally does refcounting and CoW, returning a thin wxBitmap copy rather than a
+	 * pointer into the cache stops the caller from having to worry about the returned wxColour
+	 * being invalidated in the future.
+	*/
+	return *cached_bitmap;
+}
+#endif
+
+#ifdef REHEX_CACHE_STRING_BITMAPS
+wxBitmap REHex::DocumentCtrl::hf_string_bitmap(const std::vector<AlignedCharacter> &characters, int base_col, const wxColour &foreground_colour, const wxColour &background_colour)
+{
+	PROFILE_BLOCK("REHex::DocumentCtrl::hf_string_bitmap");
+	
+	StringBitmapCacheKey cache_key(base_col, characters, pack_colour(foreground_colour), pack_colour(background_colour));
+
+	const wxBitmap *cached_string;
+	{
+		PROFILE_INNER_BLOCK("cache lookup");
+		cached_string = hf_string_bitmap_cache.get(cache_key);
+	}
+	
+	if(cached_string == NULL)
+	{
+		PROFILE_INNER_BLOCK("generate string bitmap");
+		
+		std::vector<wxBitmap> char_bitmaps;
+		char_bitmaps.reserve(characters.size());
+
+		int string_h = -1;
+		const AlignedCharacter *max_col = NULL;
+
+		for(auto c = characters.begin(); c != characters.end(); ++c)
+		{
+			PROFILE_INNER_BLOCK("get char bitmap");
+			
+			char_bitmaps.push_back(hf_char_bitmap(c->wx_char, c->unicode_char, c->char_size, foreground_colour, background_colour));
+			
+			if(c->char_size.GetHeight() > string_h)
+			{
+				string_h = c->char_size.GetHeight();
+			}
+
+			if(max_col == NULL || c->column > max_col->column)
+			{
+				max_col = &(*c);
+			}
+		}
+
+		int base_x = hf_string_width(base_col);
+		int string_w = (hf_string_width(max_col->column) - base_x) + max_col->char_size.GetWidth();
+
+		wxBitmap string_bitmap(string_w, string_h, wxBITMAP_SCREEN_DEPTH);
+		wxMemoryDC mdc(string_bitmap);
+
+		mdc.SetBackground(wxBrush(background_colour));
+		mdc.Clear();
+
+		auto c_bitmap = char_bitmaps.begin();
+		for(auto c = characters.begin(); c != characters.end(); ++c, ++c_bitmap)
+		{
+			PROFILE_INNER_BLOCK("draw char bitmap");
+			mdc.DrawBitmap(*c_bitmap, (hf_string_width(c->column) - base_x), 0, true);
+		}
+
+		mdc.SelectObject(wxNullBitmap);
+
+		/* In addition to not working on macOS, creating a mask is expensive. */
+		#ifndef __APPLE__
+		string_bitmap.SetMask(new wxMask(string_bitmap, background_colour));
+		#endif
+
+		cached_string = hf_string_bitmap_cache.set(cache_key, string_bitmap);
+	}
+
+	return *cached_string;
+}
+#endif
 
 const std::vector<REHex::DocumentCtrl::Region*> &REHex::DocumentCtrl::get_regions() const
 {
@@ -2653,6 +2838,7 @@ void REHex::DocumentCtrl::replace_all_regions(std::vector<Region*> &new_regions)
 	/* Clear and repopulate data_regions with the GenericDataRegion regions. */
 	
 	data_regions.clear();
+	end_virt_offset = -1;
 	
 	for(auto r = regions.begin(); r != regions.end(); ++r)
 	{
@@ -2660,6 +2846,12 @@ void REHex::DocumentCtrl::replace_all_regions(std::vector<Region*> &new_regions)
 		if(dr != NULL)
 		{
 			data_regions.push_back(dr);
+			
+			off_t dr_end_virt_offset = dr->virt_offset + dr->d_length;
+			if(dr_end_virt_offset > end_virt_offset)
+			{
+				end_virt_offset = dr_end_virt_offset;
+			}
 		}
 	}
 	
@@ -2836,10 +3028,11 @@ void REHex::DocumentCtrl::Region::draw_full_height_line(DocumentCtrl *doc_ctrl, 
 	dc.DrawLine(x, box_y, x, (box_y + box_hc));
 }
 
-REHex::DocumentCtrl::GenericDataRegion::GenericDataRegion(off_t d_offset, off_t d_length, off_t indent_offset):
+REHex::DocumentCtrl::GenericDataRegion::GenericDataRegion(off_t d_offset, off_t d_length, off_t virt_offset, off_t indent_offset):
 	Region(indent_offset, 0),
 	d_offset(d_offset),
-	d_length(d_length)
+	d_length(d_length),
+	virt_offset(virt_offset)
 {
 	assert(d_offset >= 0);
 	assert(d_length >= 0);
@@ -2860,9 +3053,9 @@ bool REHex::DocumentCtrl::GenericDataRegion::OnPaste(DocumentCtrl *doc_ctrl)
 	return false;
 }
 
-REHex::DocumentCtrl::DataRegion::DataRegion(off_t d_offset, off_t d_length, off_t virt_offset):
-	GenericDataRegion(d_offset, d_length, virt_offset),
-	virt_offset(virt_offset),
+REHex::DocumentCtrl::DataRegion::DataRegion(SharedDocumentPointer &document, off_t d_offset, off_t d_length, off_t virt_offset):
+	GenericDataRegion(d_offset, d_length, virt_offset, virt_offset),
+	document(document),
 	bytes_per_line_actual(1) {}
 
 int REHex::DocumentCtrl::DataRegion::calc_width(REHex::DocumentCtrl &doc)
@@ -2947,6 +3140,8 @@ void REHex::DocumentCtrl::DataRegion::calc_height(REHex::DocumentCtrl &doc, wxDC
 
 void REHex::DocumentCtrl::DataRegion::draw(REHex::DocumentCtrl &doc, wxDC &dc, int x, int64_t y)
 {
+	PROFILE_BLOCK("REHex::DocumentCtrl::DataRegion::Draw");
+	
 	draw_container(doc, dc, x, y);
 	
 	/* If we are scrolled part-way into a data region, don't render data above the client area
@@ -3086,7 +3281,9 @@ void REHex::DocumentCtrl::DataRegion::draw(REHex::DocumentCtrl &doc, wxDC &dc, i
 	{
 		if(ranges_matching_selection.isset(offset))
 		{
-			return Highlight(Palette::PAL_SECONDARY_SELECTED_TEXT_FG, Palette::PAL_SECONDARY_SELECTED_TEXT_BG, true);
+			return Highlight(
+				(*active_palette)[Palette::PAL_SECONDARY_SELECTED_TEXT_FG],
+				(*active_palette)[Palette::PAL_SECONDARY_SELECTED_TEXT_BG]);
 		}
 		else{
 			return highlight_at_off(offset);
@@ -3096,24 +3293,34 @@ void REHex::DocumentCtrl::DataRegion::draw(REHex::DocumentCtrl &doc, wxDC &dc, i
 	off_t scoped_selection_offset, scoped_selection_length;
 	std::tie(scoped_selection_offset, scoped_selection_length) = doc.get_selection_in_region(this);
 	
+	const Highlight hex_selection_highlight(
+		(*active_palette)[Palette::PAL_SELECTED_TEXT_FG],
+		(doc.hex_view_active()
+			? (*active_palette)[Palette::PAL_SELECTED_TEXT_BG]
+			: active_palette->get_average_colour(Palette::PAL_SELECTED_TEXT_BG, Palette::PAL_NORMAL_TEXT_BG)));
+	
 	auto hex_highlight_func = [&](off_t offset)
 	{
 		if(offset >= scoped_selection_offset && offset < (scoped_selection_offset + scoped_selection_length))
 		{
-			bool hex_active = doc.hex_view_active();
-			return Highlight(Palette::PAL_SELECTED_TEXT_FG, Palette::PAL_SELECTED_TEXT_BG, hex_active);
+			return hex_selection_highlight;
 		}
 		else{
 			return highlight_func(offset);
 		}
 	};
 	
+	const Highlight ascii_selection_highlight(
+		(*active_palette)[Palette::PAL_SELECTED_TEXT_FG],
+		(doc.ascii_view_active()
+			? (*active_palette)[Palette::PAL_SELECTED_TEXT_BG]
+			: active_palette->get_average_colour(Palette::PAL_SELECTED_TEXT_BG, Palette::PAL_NORMAL_TEXT_BG)));
+	
 	auto ascii_highlight_func = [&](off_t offset)
 	{
 		if(offset >= scoped_selection_offset && offset < (scoped_selection_offset + scoped_selection_length))
 		{
-			bool ascii_active = doc.ascii_view_active();
-			return Highlight(Palette::PAL_SELECTED_TEXT_FG, Palette::PAL_SELECTED_TEXT_BG, ascii_active);
+			return ascii_selection_highlight;
 		}
 		else{
 			return highlight_func(offset);
@@ -3131,7 +3338,7 @@ void REHex::DocumentCtrl::DataRegion::draw(REHex::DocumentCtrl &doc, wxDC &dc, i
 			off_t offset_within_region = cur_off - d_offset;
 			off_t display_offset = virt_offset + offset_within_region;
 			
-			std::string offset_str = format_offset(display_offset, doc.offset_display_base, doc.doc->buffer_length());
+			std::string offset_str = format_offset(display_offset, doc.offset_display_base, doc.end_virt_offset);
 			
 			normal_text_colour();
 			dc.DrawText(offset_str.c_str(), (x + offset_text_x), y);
@@ -3155,7 +3362,14 @@ void REHex::DocumentCtrl::DataRegion::draw(REHex::DocumentCtrl &doc, wxDC &dc, i
 			size_t line_data_extra_pre = std::min<size_t>((data_p - data.data()), MAX_CHAR_SIZE);
 			size_t line_data_extra_post = data_remain - line_data_len;
 			
-			draw_ascii_line(&doc, dc, x + ascii_text_x, y, line_data, line_data_len, line_data_extra_pre, line_data_extra_post, d_offset, line_pad_bytes, cur_off, alternate_row, ascii_highlight_func);
+			off_t start_char_off, start_char_len;
+			std::tie(start_char_off, start_char_len) = get_char_at(cur_off);
+			
+			size_t trailing_bytes = (start_char_off >= 0)
+				? cur_off - start_char_off
+				: 0;
+			
+			draw_ascii_line(&doc, dc, x + ascii_text_x, y, (start_char_off >= 0 ? line_data + trailing_bytes : NULL), line_data_len - trailing_bytes, line_data_extra_pre, line_data_extra_post, d_offset, line_pad_bytes + trailing_bytes, cur_off + (off_t)(trailing_bytes), alternate_row, ascii_highlight_func);
 		}
 		
 		cur_off += line_data_len;
@@ -3172,6 +3386,8 @@ void REHex::DocumentCtrl::DataRegion::draw(REHex::DocumentCtrl &doc, wxDC &dc, i
 
 void REHex::DocumentCtrl::Region::draw_hex_line(DocumentCtrl *doc_ctrl, wxDC &dc, int x, int y, const unsigned char *data, size_t data_len, unsigned int pad_bytes, off_t base_off, bool alternate_row, const std::function<Highlight(off_t)> &highlight_at_off)
 {
+	PROFILE_BLOCK("REHex::DocumentCtrl:Region::draw_hex_line");
+	
 	int hex_base_x = x;                                                          /* Base X co-ordinate to draw hex characters from */
 	int hex_x_char = (pad_bytes * 2) + (pad_bytes / doc_ctrl->bytes_per_group);  /* Column of current hex character */
 	int hex_x      = hex_base_x + doc_ctrl->hf_string_width(hex_x_char);         /* X co-ordinate of current hex character */
@@ -3183,6 +3399,8 @@ void REHex::DocumentCtrl::Region::draw_hex_line(DocumentCtrl *doc_ctrl, wxDC &dc
 	wxPen norm_fg_1px((*active_palette)[Palette::PAL_NORMAL_TEXT_FG], 1);
 	wxPen selected_bg_1px((*active_palette)[Palette::PAL_SELECTED_TEXT_BG], 1);
 	dc.SetBrush(*wxTRANSPARENT_BRUSH);
+	
+	FastRectangleFiller frf(dc);
 	
 	bool hex_active = doc_ctrl->HasFocus() && doc_ctrl->hex_view_active();
 	
@@ -3235,12 +3453,13 @@ void REHex::DocumentCtrl::Region::draw_hex_line(DocumentCtrl *doc_ctrl, wxDC &dc
 	 * base X co-ordinate.
 	*/
 	
-	std::map<std::pair<int, Palette::ColourIndex>, std::string> deferred_drawtext;
+	UnsortedMapVector<wxColour, std::string> deferred_drawtext;
 	
-	auto draw_char_deferred = [&](int base_x, Palette::ColourIndex colour_idx, int col, char ch)
+	auto draw_char_deferred = [&](const wxColour &fg_colour, int col, char ch)
 	{
-		std::pair<int, Palette::ColourIndex> k(base_x, colour_idx);
-		std::string &str = deferred_drawtext[k];
+		PROFILE_INNER_BLOCK("draw_char_deferred");
+		
+		std::string &str = deferred_drawtext[fg_colour];
 		
 		assert(str.length() <= (size_t)(col));
 		
@@ -3254,8 +3473,10 @@ void REHex::DocumentCtrl::Region::draw_hex_line(DocumentCtrl *doc_ctrl, wxDC &dc
 	 * touched by that particular wxDC::DrawText() call by inserting spaces.
 	*/
 	
-	auto fill_char_bg = [&](int char_x, Palette::ColourIndex colour_idx, bool strong)
+	auto fill_char_bg = [&](int char_x, const wxColour &bg_colour)
 	{
+		PROFILE_INNER_BLOCK("fill_char_bg");
+		
 		/* Abandoned dithering experiment. */
 		#if 0
 		wxBitmap bitmap(2, 2);
@@ -3286,16 +3507,7 @@ void REHex::DocumentCtrl::Region::draw_hex_line(DocumentCtrl *doc_ctrl, wxDC &dc
 		wxBrush bg_brush(bitmap);
 		#endif
 		
-		wxColour bg_colour = strong
-			? (*active_palette)[colour_idx]
-			: active_palette->get_average_colour(colour_idx, Palette::PAL_NORMAL_TEXT_BG);
-		
-		wxBrush bg_brush(bg_colour);
-		
-		dc.SetBrush(bg_brush);
-		dc.SetPen(*wxTRANSPARENT_PEN);
-		
-		dc.DrawRectangle(char_x, y, doc_ctrl->hf_char_width(), doc_ctrl->hf_height);
+		frf.fill_rectangle(char_x, y, doc_ctrl->hf_char_width(), doc_ctrl->hf_height, bg_colour);
 	};
 	
 	for(size_t c = pad_bytes, i = 0; i < data_len; ++c, ++i)
@@ -3319,16 +3531,16 @@ void REHex::DocumentCtrl::Region::draw_hex_line(DocumentCtrl *doc_ctrl, wxDC &dc
 			
 			if(invert && doc_ctrl->cursor_visible)
 			{
-				fill_char_bg(hex_x, Palette::PAL_INVERT_TEXT_BG, true);
-				draw_char_deferred(hex_base_x, Palette::PAL_INVERT_TEXT_FG, hex_x_char, nibble_to_hex[nibble]);
+				fill_char_bg(hex_x, (*active_palette)[Palette::PAL_INVERT_TEXT_BG]);
+				draw_char_deferred((*active_palette)[Palette::PAL_INVERT_TEXT_FG], hex_x_char, nibble_to_hex[nibble]);
 			}
 			else if(highlight.enable)
 			{
-				fill_char_bg(hex_x, highlight.bg_colour_idx, highlight.strong);
-				draw_char_deferred(hex_base_x, highlight.fg_colour_idx, hex_x_char, nibble_to_hex[nibble]);
+				fill_char_bg(hex_x, highlight.bg_colour);
+				draw_char_deferred(highlight.fg_colour, hex_x_char, nibble_to_hex[nibble]);
 			}
 			else{
-				draw_char_deferred(hex_base_x, alternate_row ? Palette::PAL_ALTERNATE_TEXT_FG : Palette::PAL_NORMAL_TEXT_FG, hex_x_char, nibble_to_hex[nibble]);
+				draw_char_deferred((*active_palette)[alternate_row ? Palette::PAL_ALTERNATE_TEXT_FG : Palette::PAL_NORMAL_TEXT_FG], hex_x_char, nibble_to_hex[nibble]);
 			}
 			
 			hex_x = hex_base_x + doc_ctrl->hf_string_width(++hex_x_char);
@@ -3386,19 +3598,25 @@ void REHex::DocumentCtrl::Region::draw_hex_line(DocumentCtrl *doc_ctrl, wxDC &dc
 		++cur_off;
 	}
 	
+	frf.flush();
+	
 	normal_text_colour();
 	
 	for(auto dd = deferred_drawtext.begin(); dd != deferred_drawtext.end(); ++dd)
 	{
-		dc.SetTextForeground((*active_palette)[dd->first.second]);
+		PROFILE_INNER_BLOCK("drawing text");
+		
+		dc.SetTextForeground(dd->first);
 		dc.SetBackgroundMode(wxTRANSPARENT);
 		
-		dc.DrawText(dd->second, dd->first.first, y);
+		dc.DrawText(dd->second, hex_base_x, y);
 	}
 }
 
 void REHex::DocumentCtrl::Region::draw_ascii_line(DocumentCtrl *doc_ctrl, wxDC &dc, int x, int y, const unsigned char *data, size_t data_len, size_t data_extra_pre, size_t data_extra_post, off_t alignment_hint, unsigned int pad_bytes, off_t base_off, bool alternate_row, const std::function<Highlight(off_t)> &highlight_at_off)
 {
+	PROFILE_BLOCK("REHex::DocumentCtrl:Region::draw_ascii_line");
+	
 	int ascii_base_x = x;                                                       /* Base X co-ordinate to draw ASCII characters from */
 	int ascii_x_char = pad_bytes;                                               /* Column of current ASCII character */
 	int ascii_x      = ascii_base_x + doc_ctrl->hf_string_width(ascii_x_char);  /* X co-ordinate of current ASCII character */
@@ -3408,6 +3626,8 @@ void REHex::DocumentCtrl::Region::draw_ascii_line(DocumentCtrl *doc_ctrl, wxDC &
 	wxPen norm_fg_1px((*active_palette)[Palette::PAL_NORMAL_TEXT_FG], 1);
 	wxPen selected_bg_1px((*active_palette)[Palette::PAL_SELECTED_TEXT_BG], 1);
 	dc.SetBrush(*wxTRANSPARENT_BRUSH);
+	
+	FastRectangleFiller frf(dc);
 	
 	off_t cur_off = base_off;
 	
@@ -3452,106 +3672,136 @@ void REHex::DocumentCtrl::Region::draw_ascii_line(DocumentCtrl *doc_ctrl, wxDC &
 	
 	const ByteRangeMap<std::string> &types = doc_ctrl->doc->get_data_types();
 	
-	/* If the start of this line isn't aligned to the bounds of a multibyte character, we can
-	 * walk backwards to find where the character began, and correctly initialise consume_chars
-	 * to skip over the trailing end of the multibyte character starting on the previous line.
-	*/
-	
 	size_t consume_chars = 0;
-	
-	{
-		auto type_at_base = types.get_range(base_off);
-		assert(type_at_base != types.end());
-		
-		off_t encoding_base = std::max(type_at_base->first.offset, alignment_hint);
-		assert(encoding_base <= base_off);
-		
-		const CharacterEncoder *encoder;
-		if(type_at_base->second != "")
-		{
-			const DataTypeRegistration *dt_reg = DataTypeRegistry::by_name(type_at_base->second);
-			assert(dt_reg != NULL);
-			
-			encoder = dt_reg->encoder;
-		}
-		else{
-			static REHex::CharacterEncoderASCII ascii_encoder;
-			encoder = &ascii_encoder;
-		}
-		
-		/* Step backwards until we are aligned with the encoding's word size. */
-		
-		size_t step_back = 0;
-		off_t at_offset = base_off;
-		
-		while(((at_offset - encoding_base) % encoder->word_size) != 0)
-		{
-			++step_back;
-			--at_offset;
-		}
-		
-		assert(at_offset >= encoding_base);
-		
-		/* Step backwards until we find the start of a character and set consume_chars if
-		 * we find one that is straddling base_off.
-		*/
-		
-		while(step_back < data_extra_pre && at_offset >= encoding_base)
-		{
-			EncodedCharacter ec = encoder->decode((data - step_back), (data_len + step_back + data_extra_post));
-			if(ec.valid)
-			{
-				if(step_back > 0 && ec.encoded_char().size() > step_back)
-				{
-					consume_chars = ec.encoded_char().size() - step_back;
-				}
-				
-				break;
-			}
-			
-			step_back += encoder->word_size;
-			at_offset -= encoder->word_size;
-		}
-	}
 	
 	/* Calling wxDC::DrawText() for each individual character on the screen is
 	 * painfully slow, so we batch up the wxDC::DrawText() calls for each colour and
 	 * area on a per-line basis.
 	 *
-	 * The key of the deferred_drawtext map is the X co-ordinate to render the string
-	 * at (hex_base_x or ascii_base_x) and the foreground colour to use.
+	 * The key of the deferred_drawtext maps is the X co-ordinate to render the string
+	 * at (hex_base_x or ascii_base_x plus an optional offset) and the foreground colour to
+	 * use.
 	 *
-	 * The value of the deferred_drawtext map is the string to be drawn, and the number of
-	 * fixed-width CHARACTERS that have been added so far.
+	 * The value of the deferred_drawtext_fast map is the string to be drawn and the number
+	 * of fixed-width CHARACTERS that have been added so far.
 	 *
-	 * The draw_char_deferred() function adds a character to be drawn to the map, while
-	 * prefixing it with any spaces necessary to pad it to the correct column from the
-	 * base X co-ordinate.
+	 * Characters that aren't exactly one character wide (e.g. wide characters) are rendered
+	 * via the deferred_drawtext_slow mechanism instead - they are rendered alone using
+	 * individual DrawText() calls, with platform-dependant caching to reduce the overhead.
 	*/
-	
-	std::map<std::pair<int, Palette::ColourIndex>, std::pair<std::string, int> > deferred_drawtext;
-	
-	auto draw_char_deferred = [&](int base_x, Palette::ColourIndex colour_idx, int col, const void *data, size_t data_len)
+
+	struct DeferredDrawTextFastValue
 	{
-		std::pair<int, Palette::ColourIndex> k(base_x, colour_idx);
-		std::pair<std::string, int> &v = deferred_drawtext[k];
+		wxString string;
+		int num_chars;
+	};
+	
+	struct DeferredDrawTextSlowKey
+	{
+		int base_col;
+		wxColour fg_colour;
+		wxColour bg_colour;
 		
-		assert(v.second <= (size_t)(col));
+		DeferredDrawTextSlowKey(int base_col, const wxColour &fg_colour, const wxColour &bg_colour):
+			base_col(base_col),
+			fg_colour(fg_colour),
+			bg_colour(bg_colour) {}
 		
-		/* Add padding to skip to requested column. */
-		v.first.append((col - v.second), ' ');
-		v.second += col - v.second;
+		bool operator==(const DeferredDrawTextSlowKey &rhs) const
+		{
+			return base_col == rhs.base_col
+				&& fg_colour == rhs.fg_colour
+				&& bg_colour == rhs.bg_colour;
+		}
+	};
+
+	struct DeferredDrawTextSlowValue
+	{
+		std::vector<AlignedCharacter> chars;
+	};
+	
+	UnsortedMapVector<wxColour, DeferredDrawTextFastValue> deferred_drawtext_fast;
+	UnsortedMapVector<DeferredDrawTextSlowKey, DeferredDrawTextSlowValue> deferred_drawtext_slow;
+	
+	#ifdef __APPLE__
+	const DeferredDrawTextSlowKey *deferred_drawtext_slow_last_key = NULL;
+	#endif
+	
+	auto draw_char_deferred = [&](const wxColour &fg_colour, int col, const void *data, size_t data_len, wxColour bg_colour)
+	{
+		PROFILE_INNER_BLOCK("draw_char_deferred");
+		
+		auto defer_monospace_char = [&](const wxString &c)
+		{
+			PROFILE_INNER_BLOCK("defer_monospace_char");
+			
+			#ifdef __APPLE__
+			deferred_drawtext_slow_last_key = NULL;
+			#endif
+			
+			DeferredDrawTextFastValue &v = deferred_drawtext_fast[fg_colour];
+
+			assert(v.num_chars <= col);
+
+			/* Add padding to skip to requested column. */
+			v.string.append((col - v.num_chars), ' ');
+			v.num_chars += col - v.num_chars;
+
+			v.string.append(c);
+			++v.num_chars;
+		};
+
+		auto defer_variable_pitch_char = [&](const wxString &wx_char, ucs4_t unicode_char, wxSize char_size)
+		{
+			PROFILE_INNER_BLOCK("defer_variable_pitch_char");
+			
+			DeferredDrawTextSlowKey k(0, fg_colour, bg_colour);
+			#ifdef __APPLE__
+			/* Okay... wxBitmap masks/transparency don't work on macOS, so if we draw multiple
+			 * contiguous lines interleaved, relying on spaces in the string not being drawn
+			 * what we instead get is the background colour of the most recently drawn line
+			 * overwriting any behind it.
+			 *
+			 * So, on macOS we instead break up deferred_drawtext_slow into chunks of
+			 * contiguous characters, starting a new chunk after changing bg/fg colour or
+			 * drawing characters using the fast path.
+			 *
+			 * Wheeee.
+			*/
+			if(deferred_drawtext_slow_last_key != NULL
+				&& deferred_drawtext_slow_last_key->fg_colour == fg_colour
+				&& deferred_drawtext_slow_last_key->bg_colour == bg_colour)
+			{
+				k.base_col = deferred_drawtext_slow_last_key->base_col;
+			}
+			else{
+				k.base_col = col;
+			}
+			
+			bool inserted;
+			UnsortedMapVector<DeferredDrawTextSlowKey, DeferredDrawTextSlowValue>::iterator ki;
+			std::tie(ki, inserted) = deferred_drawtext_slow.insert(std::make_pair(k, DeferredDrawTextSlowValue()));
+			
+			deferred_drawtext_slow_last_key = &(ki->first);
+			DeferredDrawTextSlowValue &v = ki->second;
+			#else
+			DeferredDrawTextSlowValue &v = deferred_drawtext_slow[k];
+			#endif
+
+			v.chars.push_back(AlignedCharacter(wx_char, unicode_char, char_size, col));
+		};
+		
+		wxRect char_bbox(
+			(ascii_base_x + doc_ctrl->hf_string_width(col)), y,
+			doc_ctrl->hf_char_width(), doc_ctrl->hf_char_height());
 		
 		if(consume_chars > 0)
 		{
 			/* This is the tail end of a multibyte character. */
 			
-			v.first.append("-");
-			++(v.second);
-			
 			--consume_chars;
 			
-			return;
+			return char_bbox;
 		}
 		
 		auto type_at_off = types.get_range(cur_off);
@@ -3573,82 +3823,84 @@ void REHex::DocumentCtrl::Region::draw_ascii_line(DocumentCtrl *doc_ctrl, wxDC &
 			encoder = &ascii_encoder;
 		}
 		
-		EncodedCharacter ec = encoder->decode(data, data_len + data_extra_post);
+		EncodedCharacter ec = encoder->decode(data, data_len);
 		if(ec.valid)
 		{
-			ucs4_t c;
-			u8_mbtouc_unsafe(&c, (const uint8_t*)(ec.utf8_char().data()), ec.utf8_char().size());
-			
-			/* If the character is a control character, or the on-screen size reported
-			 * by the font doesn't match that of "normal" characters, then we don't try
-			 * drawing it.
-			*/
-			
-			bool skip = uc_is_property_iso_control(c)
-				|| uc_is_property_ignorable_control(c)
-				|| uc_is_property_unassigned_code_value(c)
-				|| uc_is_property_not_a_character(c);
-			
-			if(!skip && c >= 0x7F /* Assume anything in ASCII is really a fixed-width character in the fixed-width font */)
+			wxString wx_char = wxString::FromUTF8(ec.utf8_char().c_str());
+			if (wx_char != "")
 			{
-				wxSize decoded_char_size;
-				
-				const wxSize *s = doc_ctrl->hf_gte_cache.get(ec.utf8_char());
-				if(s)
-				{
-					decoded_char_size = *s;
-				}
-				else{
-					decoded_char_size = dc.GetTextExtent(wxString::FromUTF8(ec.utf8_char().c_str()));
-					doc_ctrl->hf_gte_cache.set(ec.utf8_char(), decoded_char_size);
-				}
-				
-				if(decoded_char_size.GetWidth() != doc_ctrl->hf_char_width())
-				{
-					skip = true;
-				}
-			}
-			
-			if(!skip)
-			{
-				if(c > 0x7F)
-				{
-					/* If the character isn't in ASCII, fall back to drawing it
-					 * by itself rather than part of a line - we can't trust
-					 * the font not to lie about its width and render the whole
-					 * line wonkily if we start putting any "weird" characters
-					 * in it and I don't know of a better heuristic.
-					*/
-					
-					base_x += doc_ctrl->hf_string_width(col);
-					col = 0;
-					
-					std::pair<int, Palette::ColourIndex> k2(base_x, colour_idx);
-					std::pair<std::string, int> &v2 = deferred_drawtext[k2];
-					
-					assert(v2.first.empty());
-					assert(v2.second == 0);
-					
-					v2.first.append(ec.utf8_char());
-					++(v2.second);
-					
-					return;
-				}
-				
-				v.first.append(ec.utf8_char());
-				++(v.second);
-			}
-			else{
-				/* Doesn't match the width of "normal" characters in the font.
-				 *
-				 * Could be a full-width character, or a control character, or
-				 * maybe an emoji, or maybe even one of The Great Old Ones given
-				 * form by the Unicode Consortium, either way, its gonna mess up
-				 * our text alignment if we try drawing it.
+				ucs4_t c;
+				u8_mbtouc_unsafe(&c, (const uint8_t*)(ec.utf8_char().data()), ec.utf8_char().size());
+
+				/* If the character is a control character, or the on-screen size reported
+				 * by the font doesn't match that of "normal" characters, then we don't try
+				 * drawing it.
 				*/
-				
-				v.first.append(".");
-				++(v.second);
+
+				bool skip = uc_is_property_iso_control(c)
+					|| uc_is_property_ignorable_control(c)
+					|| uc_is_property_unassigned_code_value(c)
+					|| uc_is_property_not_a_character(c);
+
+				wxSize decoded_char_size;
+
+				if (!skip && c >= 0x7F /* Assume anything in ASCII is really a fixed-width character in the fixed-width font */)
+				{
+					const wxSize* s = doc_ctrl->hf_gte_cache.get(c);
+					if (s)
+					{
+						decoded_char_size = *s;
+					}
+					else {
+						decoded_char_size = dc.GetTextExtent(wx_char);
+						doc_ctrl->hf_gte_cache.set(c, decoded_char_size);
+					}
+
+					if (decoded_char_size.GetWidth() == 0 || decoded_char_size.GetHeight() == 0 /* Character doesn't occupy any space. */
+						|| decoded_char_size.GetWidth() > doc_ctrl->hf_string_width(ec.encoded_char().size())) /* Character won't fit into available screen space. */
+					{
+						skip = true;
+					}
+
+					char_bbox.width = doc_ctrl->hf_string_width(ec.encoded_char().size());
+					char_bbox.height = decoded_char_size.GetHeight();
+				}
+
+				if (!skip)
+				{
+					if (c > 0x7F)
+					{
+						/* If the character isn't in ASCII, fall back to drawing it
+						 * by itself rather than part of a line - we can't trust
+						 * the font not to lie about its width and render the whole
+						 * line wonkily if we start putting any "weird" characters
+						 * in it and I don't know of a better heuristic.
+						*/
+
+						defer_variable_pitch_char(wx_char, c, decoded_char_size);
+					}
+					else {
+						defer_monospace_char(wx_char);
+					}
+				}
+				else {
+					/* Doesn't match the width of "normal" characters in the font.
+					 *
+					 * Could be a full-width character, or a control character, or
+					 * maybe an emoji, or maybe even one of The Great Old Ones given
+					 * form by the Unicode Consortium, either way, its gonna mess up
+					 * our text alignment if we try drawing it.
+					*/
+
+					defer_monospace_char(".");
+				}
+			}
+			else {
+				/* wxWidgets can't decode the (valid) character for some reason.
+				 * Yes, this actually happens for some of them.
+				*/
+
+				defer_monospace_char(".");
 			}
 			
 			consume_chars = ec.encoded_char().size() - 1;
@@ -3658,11 +3910,10 @@ void REHex::DocumentCtrl::Region::draw_ascii_line(DocumentCtrl *doc_ctrl, wxDC &
 			 * TODO: Highlight this in the interface?
 			*/
 			
-			v.first.append(".");
-			++(v.second);
+			defer_monospace_char(".");
 		}
 		
-		assert(v.second == (col + 1));
+		return char_bbox;
 	};
 	
 	/* Because we need to minimise wxDC::DrawText() calls (see above), we draw any
@@ -3671,50 +3922,43 @@ void REHex::DocumentCtrl::Region::draw_ascii_line(DocumentCtrl *doc_ctrl, wxDC &
 	 * touched by that particular wxDC::DrawText() call by inserting spaces.
 	*/
 	
-	auto fill_char_bg = [&](int char_x, Palette::ColourIndex colour_idx, bool strong)
+	auto fill_char_bg = [&](wxRect char_bbox, const wxColour &bg_colour)
 	{
-		wxColour bg_colour = strong
-			? (*active_palette)[colour_idx]
-			: active_palette->get_average_colour(colour_idx, Palette::PAL_NORMAL_TEXT_BG);
-		
-		wxBrush bg_brush(bg_colour);
-		
-		dc.SetBrush(bg_brush);
-		dc.SetPen(*wxTRANSPARENT_PEN);
-		
-		dc.DrawRectangle(char_x, y, doc_ctrl->hf_char_width(), doc_ctrl->hf_height);
+		frf.fill_rectangle(char_bbox, bg_colour);
 	};
 	
 	for(size_t c = pad_bytes, i = 0; i < data_len; ++c, ++i)
 	{
-		unsigned char byte = (data != NULL) ? data[i] : '?';
+		const void *c_data = (data != NULL) ? (const void*)(data + i)          : (const void*)("?");
+		size_t c_data_len  = (data != NULL) ? (data_len - i) + data_extra_post : 1;
 		
 		auto highlight = highlight_at_off(cur_off);
 		
+		wxRect char_bbox;
 		if(ascii_active)
 		{
 			if(cur_off == cursor_pos && !doc_ctrl->insert_mode && doc_ctrl->cursor_visible)
 			{
-				fill_char_bg(ascii_x, Palette::PAL_INVERT_TEXT_BG, true);
-				draw_char_deferred(ascii_base_x, Palette::PAL_INVERT_TEXT_FG, ascii_x_char, data + i, data_len - i);
+				char_bbox = draw_char_deferred((*active_palette)[Palette::PAL_INVERT_TEXT_FG], ascii_x_char, c_data, c_data_len, (*active_palette)[Palette::PAL_INVERT_TEXT_BG]);
+				fill_char_bg(char_bbox, (*active_palette)[Palette::PAL_INVERT_TEXT_BG]);
 			}
 			else if(highlight.enable)
 			{
-				fill_char_bg(ascii_x, highlight.bg_colour_idx, highlight.strong);
-				draw_char_deferred(ascii_base_x, highlight.fg_colour_idx, ascii_x_char, data + i, data_len - i);
+				char_bbox = draw_char_deferred(highlight.fg_colour, ascii_x_char, c_data, c_data_len, highlight.bg_colour);
+				fill_char_bg(char_bbox, highlight.bg_colour);
 			}
 			else{
-				draw_char_deferred(ascii_base_x, alternate_row ? Palette::PAL_ALTERNATE_TEXT_FG : Palette::PAL_NORMAL_TEXT_FG, ascii_x_char, data + i, data_len - i);
+				char_bbox = draw_char_deferred((*active_palette)[alternate_row ? Palette::PAL_ALTERNATE_TEXT_FG : Palette::PAL_NORMAL_TEXT_FG], ascii_x_char, c_data, c_data_len, (*active_palette)[Palette::PAL_NORMAL_TEXT_BG]);
 			}
 		}
 		else{
 			if(highlight.enable)
 			{
-				fill_char_bg(ascii_x, highlight.bg_colour_idx, highlight.strong);
-				draw_char_deferred(ascii_base_x, highlight.fg_colour_idx, ascii_x_char, data + i, data_len - i);
+				char_bbox = draw_char_deferred(highlight.fg_colour, ascii_x_char, c_data, c_data_len, highlight.bg_colour);
+				fill_char_bg(char_bbox, highlight.bg_colour);
 			}
 			else{
-				draw_char_deferred(ascii_base_x, alternate_row ? Palette::PAL_ALTERNATE_TEXT_FG : Palette::PAL_NORMAL_TEXT_FG, ascii_x_char, data + i, data_len - i);
+				char_bbox = draw_char_deferred((*active_palette)[alternate_row ? Palette::PAL_ALTERNATE_TEXT_FG : Palette::PAL_NORMAL_TEXT_FG], ascii_x_char, c_data, c_data_len, (*active_palette)[Palette::PAL_NORMAL_TEXT_BG]);
 			}
 			
 			if(cur_off == cursor_pos && !doc_ctrl->insert_mode)
@@ -3722,7 +3966,7 @@ void REHex::DocumentCtrl::Region::draw_ascii_line(DocumentCtrl *doc_ctrl, wxDC &
 				dc.SetBrush(*wxTRANSPARENT_BRUSH);
 				dc.SetPen(norm_fg_1px);
 				
-				dc.DrawRectangle(ascii_x, y, doc_ctrl->hf_char_width(), doc_ctrl->hf_height);
+				dc.DrawRectangle(char_bbox);
 			}
 		}
 		
@@ -3737,14 +3981,82 @@ void REHex::DocumentCtrl::Region::draw_ascii_line(DocumentCtrl *doc_ctrl, wxDC &
 		++cur_off;
 	}
 	
-	normal_text_colour();
+	frf.flush();
 	
-	for(auto dd = deferred_drawtext.begin(); dd != deferred_drawtext.end(); ++dd)
+	normal_text_colour();
+
+	/* Fast text rendering path - render fixed-width characters using a single wxDC.DrawText()
+	 * call per foreground colour, leaving gaps for characters drawn in other passes using
+	 * space characters.
+	*/
+	
+	for(auto dd = deferred_drawtext_fast.begin(); dd != deferred_drawtext_fast.end(); ++dd)
 	{
-		dc.SetTextForeground((*active_palette)[dd->first.second]);
-		dc.SetBackgroundMode(wxTRANSPARENT);
+		PROFILE_INNER_BLOCK("drawing text (fast path)");
 		
-		dc.DrawText(wxString::FromUTF8(dd->second.first.c_str()), dd->first.first, y);
+		const wxColour &fg_colour = dd->first;
+
+		dc.SetTextForeground(fg_colour);
+		dc.SetBackgroundMode(wxTRANSPARENT);
+
+		dc.DrawText(dd->second.string, ascii_base_x, y);
+	}
+
+	/* Slow text rendering path - render variable-width characters using a single
+	 * wxDC.DrawText() call for each character so we can align them to the grid of normal
+	 * characters in the font.
+	 *
+	 * There are two (optional) optimisations here:
+	 *
+	 * REHEX_CACHE_CHARACTER_BITMAPS
+	 *
+	 *   Renders the characters into a secondary wxBitmap and caches it so future draws of the
+	 *   same character are just a bitmap blit rather than rendering text every time.
+	 *
+	 *   This offers a significant performance boost on Windows, macOS and Linux and is enabled
+	 *   on all platforms.
+	 *
+	 * REHEX_CACHE_STRING_BITMAPS
+	 *
+	 *   In addition to REHEX_CACHE_CHARACTER_BITMAPS, the individual character bitmaps in each
+	 *   deferred_drawtext_slow are copied into another secondary bitmap, which is again cached
+	 *   and blitted to the DC as a whole line in the future.
+	 *
+	 *   This adds another significant speed boost on Windows and macOS, where it is enabled.
+	 *   There is no significant improvement on Linux, so it isn't enabled there.
+	*/
+	
+	for(auto dd = deferred_drawtext_slow.begin(); dd != deferred_drawtext_slow.end(); ++dd)
+	{
+		PROFILE_INNER_BLOCK("drawing text (slow path)");
+		
+		wxColour fg_colour = dd->first.fg_colour;
+		wxColour bg_colour = dd->first.bg_colour;
+
+		dc.SetTextForeground(fg_colour);
+		dc.SetBackgroundMode(wxTRANSPARENT);
+
+#if defined(REHEX_CACHE_CHARACTER_BITMAPS) && defined(REHEX_CACHE_STRING_BITMAPS)
+		wxBitmap string_bitmap = doc_ctrl->hf_string_bitmap(dd->second.chars, dd->first.base_col, fg_colour, bg_colour);
+		int string_x = ascii_base_x + doc_ctrl->hf_string_width(dd->first.base_col);
+		
+		dc.DrawBitmap(string_bitmap, string_x, y, true);
+#elif defined(REHEX_CACHE_CHARACTER_BITMAPS)
+		for(auto c = dd->second.chars.begin(); c != dd->second.chars.end(); ++c)
+		{
+			wxBitmap char_bitmap = doc_ctrl->hf_char_bitmap(c->wx_char, c->unicode_char, c->char_size, fg_colour, bg_colour);
+			int char_x = ascii_base_x + doc_ctrl->hf_string_width(dd->first.base_col + c->column);
+			
+			dc.DrawBitmap(char_bitmap, char_x, y);
+		}
+#else
+		for(auto c = dd->second.chars.begin(); c != dd->second.chars.end(); ++c)
+		{
+			int char_x = ascii_base_x + doc_ctrl->hf_string_width(dd->first.base_col + c->column);
+			
+			dc.DrawText(c->wx_char, char_x, y);
+		}
+#endif
 	}
 }
 
@@ -3851,6 +4163,13 @@ off_t REHex::DocumentCtrl::DataRegion::offset_at_xy_ascii(REHex::DocumentCtrl &d
 	else if(clicked_offset < line_data_end)
 	{
 		/* Clicked on a character */
+		
+		auto char_at_pos = get_char_at(clicked_offset);
+		if(char_at_pos.first >= 0)
+		{
+			clicked_offset = char_at_pos.first;
+		}
+		
 		return clicked_offset;
 	}
 	else{
@@ -3941,6 +4260,13 @@ off_t REHex::DocumentCtrl::DataRegion::offset_near_xy_ascii(REHex::DocumentCtrl 
 	else if(clicked_offset < line_data_end)
 	{
 		/* Mouse is on a character. */
+		
+		auto char_at_pos = get_char_at(clicked_offset);
+		if(char_at_pos.first >= 0)
+		{
+			clicked_offset = char_at_pos.first;
+		}
+		
 		return clicked_offset;
 	}
 	else{
@@ -4000,7 +4326,7 @@ std::pair<off_t, REHex::DocumentCtrl::GenericDataRegion::ScreenArea> REHex::Docu
 	}
 }
 
-off_t REHex::DocumentCtrl::DataRegion::cursor_left_from(off_t pos)
+off_t REHex::DocumentCtrl::DataRegion::cursor_left_from(off_t pos, ScreenArea active_type)
 {
 	assert(pos >= d_offset);
 	assert(pos <= (d_offset + d_length));
@@ -4009,6 +4335,18 @@ off_t REHex::DocumentCtrl::DataRegion::cursor_left_from(off_t pos)
 	
 	if(new_pos >= d_offset && new_pos < (d_offset + d_length))
 	{
+		if(active_type == SA_ASCII)
+		{
+			off_t char_at_pos_off, char_at_pos_len;
+			std::tie(char_at_pos_off, char_at_pos_len) = get_char_at(new_pos);
+			
+			if(char_at_pos_off >= 0)
+			{
+				assert(char_at_pos_len > 0);
+				new_pos = char_at_pos_off;
+			}
+		}
+		
 		return new_pos;
 	}
 	else{
@@ -4016,12 +4354,24 @@ off_t REHex::DocumentCtrl::DataRegion::cursor_left_from(off_t pos)
 	}
 }
 
-off_t REHex::DocumentCtrl::DataRegion::cursor_right_from(off_t pos)
+off_t REHex::DocumentCtrl::DataRegion::cursor_right_from(off_t pos, ScreenArea active_type)
 {
 	assert(pos >= d_offset);
 	assert(pos <= (d_offset + d_length));
 	
 	off_t new_pos = pos + 1;
+	
+	if(active_type == SA_ASCII)
+	{
+		off_t char_at_pos_off, char_at_pos_len;
+		std::tie(char_at_pos_off, char_at_pos_len) = get_char_at(pos);
+		
+		if(char_at_pos_off >= 0)
+		{
+			assert(char_at_pos_len > 0);
+			new_pos = char_at_pos_off + char_at_pos_len;
+		}
+	}
 	
 	if(new_pos >= d_offset && new_pos < (d_offset + d_length))
 	{
@@ -4032,7 +4382,7 @@ off_t REHex::DocumentCtrl::DataRegion::cursor_right_from(off_t pos)
 	}
 }
 
-off_t REHex::DocumentCtrl::DataRegion::cursor_up_from(off_t pos)
+off_t REHex::DocumentCtrl::DataRegion::cursor_up_from(off_t pos, ScreenArea active_type)
 {
 	assert(pos >= d_offset);
 	assert(pos <= (d_offset + d_length));
@@ -4047,6 +4397,18 @@ off_t REHex::DocumentCtrl::DataRegion::cursor_up_from(off_t pos)
 	
 	if(new_pos >= d_offset && new_pos < (d_offset + d_length))
 	{
+		if(active_type == SA_ASCII)
+		{
+			off_t char_at_pos_off, char_at_pos_len;
+			std::tie(char_at_pos_off, char_at_pos_len) = get_char_at(new_pos);
+			
+			if(char_at_pos_off >= 0)
+			{
+				assert(char_at_pos_len > 0);
+				new_pos = char_at_pos_off;
+			}
+		}
+		
 		return new_pos;
 	}
 	else{
@@ -4054,7 +4416,7 @@ off_t REHex::DocumentCtrl::DataRegion::cursor_up_from(off_t pos)
 	}
 }
 
-off_t REHex::DocumentCtrl::DataRegion::cursor_down_from(off_t pos)
+off_t REHex::DocumentCtrl::DataRegion::cursor_down_from(off_t pos, ScreenArea active_type)
 {
 	assert(pos >= d_offset);
 	assert(pos <= (d_offset + d_length));
@@ -4076,6 +4438,18 @@ off_t REHex::DocumentCtrl::DataRegion::cursor_down_from(off_t pos)
 	
 	if(new_pos >= d_offset && new_pos < (d_offset + d_length))
 	{
+		if(active_type == SA_ASCII)
+		{
+			off_t char_at_pos_off, char_at_pos_len;
+			std::tie(char_at_pos_off, char_at_pos_len) = get_char_at(new_pos);
+			
+			if(char_at_pos_off >= 0)
+			{
+				assert(char_at_pos_len > 0);
+				new_pos = char_at_pos_off;
+			}
+		}
+		
 		return new_pos;
 	}
 	else{
@@ -4083,7 +4457,7 @@ off_t REHex::DocumentCtrl::DataRegion::cursor_down_from(off_t pos)
 	}
 }
 
-off_t REHex::DocumentCtrl::DataRegion::cursor_home_from(off_t pos)
+off_t REHex::DocumentCtrl::DataRegion::cursor_home_from(off_t pos, ScreenArea active_type)
 {
 	assert(pos >= d_offset);
 	assert(pos <= (d_offset + d_length));
@@ -4095,10 +4469,31 @@ off_t REHex::DocumentCtrl::DataRegion::cursor_home_from(off_t pos)
 		(pos - bytes_from_start_of_visual_line),
 		d_offset);
 	
+	if(active_type == SA_ASCII)
+	{
+		off_t char_at_pos_off, char_at_pos_len;
+		std::tie(char_at_pos_off, char_at_pos_len) = get_char_at(new_pos);
+		
+		if(char_at_pos_off >= 0)
+		{
+			assert(char_at_pos_len > 0);
+			
+			if(char_at_pos_off < new_pos && (char_at_pos_off + char_at_pos_len) <= (d_offset + d_length))
+			{
+				/* There is a character spanning the last byte(s) of the previous
+				 * row and the first byte(s) of this one, advance the cursor to the
+				 * first complete character on this row.
+				*/
+				
+				new_pos = char_at_pos_off + char_at_pos_len;
+			}
+		}
+	}
+	
 	return new_pos;
 }
 
-off_t REHex::DocumentCtrl::DataRegion::cursor_end_from(off_t pos)
+off_t REHex::DocumentCtrl::DataRegion::cursor_end_from(off_t pos, ScreenArea active_type)
 {
 	assert(pos >= d_offset);
 	assert(pos <= (d_offset + d_length));
@@ -4115,6 +4510,18 @@ off_t REHex::DocumentCtrl::DataRegion::cursor_end_from(off_t pos)
 	off_t new_pos = std::min(
 		(pos + (bytes_per_line_actual - bytes_from_start_of_visual_line) - 1),
 		(d_offset + d_length - 1));
+	
+	if(active_type == SA_ASCII)
+	{
+		off_t char_at_pos_off, char_at_pos_len;
+		std::tie(char_at_pos_off, char_at_pos_len) = get_char_at(new_pos);
+		
+		if(char_at_pos_off >= 0)
+		{
+			assert(char_at_pos_len > 0);
+			new_pos = char_at_pos_off;
+		}
+	}
 	
 	return new_pos;
 }
@@ -4237,27 +4644,25 @@ REHex::DocumentCtrl::DataRegion::Highlight REHex::DocumentCtrl::DataRegion::high
 	return NoHighlight();
 }
 
-REHex::DocumentCtrl::DataRegionDocHighlight::DataRegionDocHighlight(off_t d_offset, off_t d_length, off_t virt_offset, Document &doc):
-	DataRegion(d_offset, d_length, virt_offset), doc(doc) {}
+REHex::DocumentCtrl::DataRegionDocHighlight::DataRegionDocHighlight(SharedDocumentPointer &document, off_t d_offset, off_t d_length, off_t virt_offset):
+	DataRegion(document, d_offset, d_length, virt_offset) {}
 
 REHex::DocumentCtrl::DataRegion::Highlight REHex::DocumentCtrl::DataRegionDocHighlight::highlight_at_off(off_t off) const
 {
-	const NestedOffsetLengthMap<int> &highlights = doc.get_highlights();
+	const NestedOffsetLengthMap<int> &highlights = document->get_highlights();
 	
 	auto highlight = NestedOffsetLengthMap_get(highlights, off);
 	if(highlight != highlights.end())
 	{
 		return Highlight(
-			active_palette->get_highlight_fg_idx(highlight->second),
-			active_palette->get_highlight_bg_idx(highlight->second),
-			true);
+			active_palette->get_highlight_fg(highlight->second),
+			active_palette->get_highlight_bg(highlight->second));
 	}
-	else if(doc.is_byte_dirty(off))
+	else if(document->is_byte_dirty(off))
 	{
 		return Highlight(
-			Palette::PAL_DIRTY_TEXT_FG,
-			Palette::PAL_DIRTY_TEXT_BG,
-			true);
+			(*active_palette)[Palette::PAL_DIRTY_TEXT_FG],
+			(*active_palette)[Palette::PAL_DIRTY_TEXT_BG]);
 	}
 	else{
 		return NoHighlight();
@@ -4369,5 +4774,75 @@ wxCursor REHex::DocumentCtrl::CommentRegion::cursor_for_point(REHex::DocumentCtr
 	}
 	else{
 		return wxNullCursor;
+	}
+}
+
+std::pair<off_t,off_t> REHex::DocumentCtrl::DataRegion::get_char_at(off_t offset)
+{
+	assert(offset >= d_offset && offset <= (d_offset + d_length));
+	
+	if(offset == (d_offset + d_length))
+	{
+		return std::make_pair(-1, -1);
+	}
+	
+	const ByteRangeMap<std::string> &types = document->get_data_types();
+	
+	/* If the offset isn't aligned to the bounds of a multibyte character and the decoder can
+	 * detect the start/end of characters, then we can walk backwards to find where the
+	 * character began, otherwise we have to use CharacterFinder to find the characters by
+	 * linearly scanning from the start of the region...
+	*/
+	
+	auto type_at_base = types.get_range(offset);
+	assert(type_at_base != types.end());
+	
+	off_t encoding_base = type_at_base->first.offset;
+	assert(encoding_base <= offset);
+	
+	const CharacterEncoder *encoder;
+	if(type_at_base->second != "")
+	{
+		const DataTypeRegistration *dt_reg = DataTypeRegistry::by_name(type_at_base->second);
+		assert(dt_reg != NULL);
+		
+		encoder = dt_reg->encoder;
+	}
+	else{
+		static REHex::CharacterEncoderASCII ascii_encoder;
+		encoder = &ascii_encoder;
+	}
+	
+	if(encoder->mid_char_safe)
+	{
+		/* Step back if necessary to align to word size. */
+		off_t at_offset = offset - ((offset - encoding_base) % encoder->word_size);
+		
+		off_t min_offset = std::max((at_offset - (off_t)(MAX_CHAR_SIZE)), d_offset);
+		
+		std::vector<unsigned char> data = document->read_data(min_offset, (MAX_CHAR_SIZE * 2));
+		ssize_t data_offset = at_offset - min_offset;
+		
+		while(at_offset >= min_offset && data_offset < (ssize_t)(data.size()) && data_offset >= 0)
+		{
+			EncodedCharacter ec = encoder->decode((data.data() + data_offset), (data.size() - data_offset));
+			if(ec.valid && (at_offset + (off_t)(ec.encoded_char().size())) > offset)
+			{
+				return std::make_pair(at_offset, ec.encoded_char().size());
+			}
+			
+			--data_offset;
+			--at_offset;
+		}
+		
+		return std::make_pair(offset, 1);
+	}
+	else{
+		if(!char_finder)
+		{
+			char_finder.reset(new CharacterFinder(document, d_offset, d_length));
+		}
+		
+		return char_finder->get_char_range(offset);
 	}
 }

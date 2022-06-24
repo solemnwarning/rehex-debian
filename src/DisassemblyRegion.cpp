@@ -34,9 +34,8 @@ static const off_t SOFT_IR_LIMIT = 10240; /* 100KiB */
 static const size_t INSTRUCTION_CACHE_LIMIT = 250000;
 
 REHex::DisassemblyRegion::DisassemblyRegion(SharedDocumentPointer &doc, off_t offset, off_t length, off_t virt_offset, cs_arch arch, cs_mode mode):
-	GenericDataRegion(offset, length, virt_offset),
+	GenericDataRegion(offset, length, virt_offset, virt_offset),
 	doc(doc),
-	virt_offset(virt_offset),
 	arch(arch),
 	preferred_asm_syntax(AsmSyntax::INTEL)
 {
@@ -208,38 +207,48 @@ void REHex::DisassemblyRegion::draw(DocumentCtrl &doc_ctrl, wxDC &dc, int x, int
 		if(highlight != highlights.end())
 		{
 			return Highlight(
-				active_palette->get_highlight_fg_idx(highlight->second),
-				active_palette->get_highlight_bg_idx(highlight->second),
-				true);
+				active_palette->get_highlight_fg(highlight->second),
+				active_palette->get_highlight_bg(highlight->second));
 		}
 		else if(doc->is_byte_dirty(offset))
 		{
 			return Highlight(
-				Palette::PAL_DIRTY_TEXT_FG,
-				Palette::PAL_DIRTY_TEXT_BG,
-				true);
+				(*active_palette)[Palette::PAL_DIRTY_TEXT_FG],
+				(*active_palette)[Palette::PAL_DIRTY_TEXT_BG]);
 		}
 		else{
 			return (Highlight)(NoHighlight());
 		}
 	};
 	
+	const Highlight hex_selection_highlight(
+		(*active_palette)[Palette::PAL_SELECTED_TEXT_FG],
+		(doc_ctrl.hex_view_active()
+			? (*active_palette)[Palette::PAL_SELECTED_TEXT_BG]
+			: active_palette->get_average_colour(Palette::PAL_SELECTED_TEXT_BG, Palette::PAL_NORMAL_TEXT_BG)));
+	
 	auto hex_highlight_func = [&](off_t offset)
 	{
 		if(selection_len > 0 && offset >= selection_off && offset < (selection_off + selection_len))
 		{
-			return Highlight(Palette::PAL_SELECTED_TEXT_FG, Palette::PAL_SELECTED_TEXT_BG, doc_ctrl.hex_view_active());
+			return hex_selection_highlight;
 		}
 		else{
 			return base_highlight_func(offset);
 		}
 	};
 	
+	const Highlight ascii_selection_highlight(
+		(*active_palette)[Palette::PAL_SELECTED_TEXT_FG],
+		(doc_ctrl.ascii_view_active()
+			? (*active_palette)[Palette::PAL_SELECTED_TEXT_BG]
+			: active_palette->get_average_colour(Palette::PAL_SELECTED_TEXT_BG, Palette::PAL_NORMAL_TEXT_BG)));
+	
 	auto ascii_highlight_func = [&](off_t offset)
 	{
 		if(selection_len > 0 && offset >= selection_off && offset < (selection_off + selection_len))
 		{
-			return Highlight(Palette::PAL_SELECTED_TEXT_FG, Palette::PAL_SELECTED_TEXT_BG, doc_ctrl.ascii_view_active());
+			return ascii_selection_highlight;
 		}
 		else{
 			return base_highlight_func(offset);
@@ -288,7 +297,7 @@ void REHex::DisassemblyRegion::draw(DocumentCtrl &doc_ctrl, wxDC &dc, int x, int
 			off_t offset_within_region = instr->offset - d_offset;
 			off_t display_offset = virt_offset + offset_within_region;
 			
-			std::string offset_str = format_offset(display_offset, doc_ctrl.get_offset_display_base(), doc->buffer_length());
+			std::string offset_str = format_offset(display_offset, doc_ctrl.get_offset_display_base(), doc_ctrl.get_end_virt_offset());
 			
 			set_text_attribs(false, false);
 			dc.DrawText(offset_str, x + offset_text_x, y);
@@ -347,7 +356,7 @@ void REHex::DisassemblyRegion::draw(DocumentCtrl &doc_ctrl, wxDC &dc, int x, int
 			off_t offset_within_region = up_off - d_offset;
 			off_t display_offset = virt_offset + offset_within_region;
 			
-			std::string offset_str = format_offset(display_offset, doc_ctrl.get_offset_display_base(), doc->buffer_length());
+			std::string offset_str = format_offset(display_offset, doc_ctrl.get_offset_display_base(), doc_ctrl.get_end_virt_offset());
 			
 			set_text_attribs(false, false);
 			dc.DrawText(offset_str, x + offset_text_x, y);
@@ -721,12 +730,41 @@ std::pair<off_t, REHex::DocumentCtrl::GenericDataRegion::ScreenArea> REHex::Disa
 	return std::make_pair<off_t, ScreenArea>(-1, SA_NONE);
 }
 
-off_t REHex::DisassemblyRegion::cursor_left_from(off_t pos)
+off_t REHex::DisassemblyRegion::cursor_left_from(off_t pos, ScreenArea active_type)
 {
 	assert(pos >= d_offset);
 	assert(pos <= (d_offset + d_length));
 	
-	if(pos > d_offset)
+	off_t up_off = unprocessed_offset();
+	
+	if(active_type == SA_SPECIAL && pos < up_off)
+	{
+		auto instr = instruction_by_offset(pos);
+		if(instr.second == instr.first.end())
+		{
+			/* Couldn't get instruction. */
+			return pos;
+		}
+		
+		off_t this_instr_off = instr.second->offset;
+		
+		if(this_instr_off == d_offset)
+		{
+			/* Already on first instruction in region. */
+			return CURSOR_PREV_REGION;
+		}
+		
+		auto prev_instr = instruction_by_offset(this_instr_off - 1);
+		if(prev_instr.second == prev_instr.first.end())
+		{
+			/* Couldn't get instruction. */
+			return pos;
+		}
+		
+		off_t prev_instr_off = prev_instr.second->offset;
+		return prev_instr_off;
+	}
+	else if(pos > d_offset)
 	{
 		return pos - 1;
 	}
@@ -735,12 +773,34 @@ off_t REHex::DisassemblyRegion::cursor_left_from(off_t pos)
 	}
 }
 
-off_t REHex::DisassemblyRegion::cursor_right_from(off_t pos)
+off_t REHex::DisassemblyRegion::cursor_right_from(off_t pos, ScreenArea active_area)
 {
 	assert(pos >= d_offset);
 	assert(pos <= (d_offset + d_length));
 	
-	if((pos + 1) < (d_offset + d_length))
+	off_t up_off = unprocessed_offset();
+	
+	if(active_area == SA_SPECIAL && pos < up_off)
+	{
+		auto instr = instruction_by_offset(pos);
+		if(instr.second == instr.first.end())
+		{
+			/* Couldn't get instruction. */
+			return pos;
+		}
+		
+		off_t this_instr_off = instr.second->offset;
+		off_t next_instr_off = this_instr_off + instr.second->length;
+		
+		if(this_instr_off >= (d_offset + d_length))
+		{
+			/* Already on last instruction in region. */
+			return CURSOR_NEXT_REGION;
+		}
+		
+		return next_instr_off;
+	}
+	else if((pos + 1) < (d_offset + d_length))
 	{
 		return pos + 1;
 	}
@@ -749,7 +809,7 @@ off_t REHex::DisassemblyRegion::cursor_right_from(off_t pos)
 	}
 }
 
-off_t REHex::DisassemblyRegion::cursor_up_from(off_t pos)
+off_t REHex::DisassemblyRegion::cursor_up_from(off_t pos, ScreenArea active_type)
 {
 	assert(pos >= d_offset);
 	assert(pos <= (d_offset + d_length));
@@ -805,9 +865,15 @@ off_t REHex::DisassemblyRegion::cursor_up_from(off_t pos)
 				return pos;
 			}
 			
-			return std::min(
-				(instr.second->offset + (pos - up_off)),
-				(instr.second->offset + instr.second->length - 1));
+			if(active_type == SA_SPECIAL)
+			{
+				return instr.second->offset;
+			}
+			else{
+				return std::min(
+					(instr.second->offset + (pos - up_off)),
+					(instr.second->offset + instr.second->length - 1));
+			}
 		}
 	}
 	else{
@@ -816,7 +882,7 @@ off_t REHex::DisassemblyRegion::cursor_up_from(off_t pos)
 	}
 }
 
-off_t REHex::DisassemblyRegion::cursor_down_from(off_t pos)
+off_t REHex::DisassemblyRegion::cursor_down_from(off_t pos, ScreenArea active_type)
 {
 	assert(pos >= d_offset);
 	assert(pos <= (d_offset + d_length));
@@ -865,9 +931,15 @@ off_t REHex::DisassemblyRegion::cursor_down_from(off_t pos)
 		off_t next_instr_off = next_instr.second->offset;
 		off_t next_instr_len = next_instr.second->length;
 		
-		return std::min(
-			(next_instr_off + (pos - this_instr_off)),
-			(next_instr_off + next_instr_len - 1));
+		if(active_type == SA_SPECIAL)
+		{
+			return next_instr_off;
+		}
+		else{
+			return std::min(
+				(next_instr_off + (pos - this_instr_off)),
+				(next_instr_off + next_instr_len - 1));
+		}
 	}
 	else{
 		/* Move down a line from within unprocessed data. */
@@ -892,7 +964,7 @@ off_t REHex::DisassemblyRegion::cursor_down_from(off_t pos)
 	}
 }
 
-off_t REHex::DisassemblyRegion::cursor_home_from(off_t pos)
+off_t REHex::DisassemblyRegion::cursor_home_from(off_t pos, ScreenArea active_type)
 {
 	assert(pos >= d_offset);
 	assert(pos <= (d_offset + d_length));
@@ -921,7 +993,7 @@ off_t REHex::DisassemblyRegion::cursor_home_from(off_t pos)
 	}
 }
 
-off_t REHex::DisassemblyRegion::cursor_end_from(off_t pos)
+off_t REHex::DisassemblyRegion::cursor_end_from(off_t pos, ScreenArea active_type)
 {
 	assert(pos >= d_offset);
 	assert(pos <= (d_offset + d_length));
