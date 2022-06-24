@@ -238,6 +238,8 @@ src/BytesPerLineDialog.cpp
 src/BytesPerLineDialog.hpp
 src/CharacterEncoder.cpp
 src/CharacterEncoder.hpp
+src/CharacterFinder.cpp
+src/CharacterFinder.hpp
 src/ClickText.cpp
 src/ClickText.hpp
 src/CodeCtrl.cpp
@@ -261,6 +263,7 @@ src/EditCommentDialog.cpp
 src/EditCommentDialog.hpp
 src/Events.cpp
 src/Events.hpp
+src/FastRectangleFiller.hpp
 src/FillRangeDialog.cpp
 src/FillRangeDialog.hpp
 src/IntelHexExport.cpp
@@ -289,6 +292,7 @@ src/Tab.hpp
 src/Tab.luadoc
 src/ToolPanel.cpp
 src/ToolPanel.hpp
+src/UnsortedMapVector.hpp
 src/VirtualMappingDialog.cpp
 src/VirtualMappingDialog.hpp
 src/VirtualMappingList.cpp
@@ -309,6 +313,8 @@ src/lua-plugin-preload.lua
 src/mainwindow.cpp
 src/mainwindow.hpp
 src/platform.hpp
+src/profile.cpp
+src/profile.hpp
 src/search.cpp
 src/search.hpp
 src/textentrydialog.cpp
@@ -321,6 +327,7 @@ tests/BitmapTool.cpp
 tests/ByteRangeMap.cpp
 tests/ByteRangeSet.cpp
 tests/CharacterEncoder.cpp
+tests/CharacterFinder.cpp
 tests/CommentTree.cpp
 tests/CommentsDataObject.cpp
 tests/ConsoleBuffer.cpp
@@ -328,6 +335,7 @@ tests/DiffWindow.cpp
 tests/DisassemblyRegion.cpp
 tests/Document.cpp
 tests/DocumentCtrl.cpp
+tests/FastRectangleFiller.cpp
 tests/IntelHexExport.cpp
 tests/IntelHexImport.cpp
 tests/LuaPluginLoader.cpp

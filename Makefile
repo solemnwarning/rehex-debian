@@ -23,6 +23,7 @@ LUA_PKG      ?= $(shell pkg-config --exists lua5.3 && echo lua5.3 || echo lua)
 EXE ?= rehex
 EMBED_EXE ?= ./tools/embed
 GTKCONFIG_EXE ?= ./tools/gtk-config
+HELP_TARGET ?= help/rehex.htb
 
 # Wrapper around the $(shell) function that aborts the build if the command
 # exits with a nonzero status.
@@ -46,9 +47,20 @@ ifneq ($(MAKECMDGOALS),)
 	endif
 endif
 
+ifeq ($(BUILD_HELP),)
+	BUILD_HELP=1
+endif
+
+ifeq ($(BUILD_HELP),0)
+	HELP_TARGET :=
+else
+	HELP_CFLAGS := -DBUILD_HELP
+	HELP_LIBS := html
+endif
+
 ifeq ($(need_compiler_flags),1)
-	WX_CXXFLAGS ?= $(call shell-or-die,$(WX_CONFIG) --cxxflags base core aui propgrid adv html)
-	WX_LIBS     ?= $(call shell-or-die,$(WX_CONFIG) --libs     base core aui propgrid adv html)
+	WX_CXXFLAGS ?= $(call shell-or-die,$(WX_CONFIG) --cxxflags base core aui propgrid adv $(HELP_LIBS))
+	WX_LIBS     ?= $(call shell-or-die,$(WX_CONFIG) --libs     base core aui propgrid adv $(HELP_LIBS))
 	
 	CAPSTONE_CFLAGS ?= $(call shell-or-die,pkg-config $(CAPSTONE_PKG) --cflags)
 	CAPSTONE_LIBS   ?= $(call shell-or-die,pkg-config $(CAPSTONE_PKG) --libs)
@@ -73,9 +85,19 @@ else
 	DEBUG_CFLAGS := -ggdb
 endif
 
-CFLAGS          := -Wall -std=c99   -I. -Iinclude/ -IwxLua/modules/ $(DEBUG_CFLAGS) $(CAPSTONE_CFLAGS) $(JANSSON_CFLAGS) $(LUA_CFLAGS) $(CFLAGS)
-CXXFLAGS_NO_GTK := -Wall -std=c++11 -I. -Iinclude/ -IwxLua/modules/ $(DEBUG_CFLAGS) $(CAPSTONE_CFLAGS) $(JANSSON_CFLAGS) $(LUA_CFLAGS) $(WX_CXXFLAGS) $(CXXFLAGS)
-CXXFLAGS        := -Wall -std=c++11 -I. -Iinclude/ -IwxLua/modules/ $(DEBUG_CFLAGS) $(CAPSTONE_CFLAGS) $(JANSSON_CFLAGS) $(LUA_CFLAGS) $(WX_CXXFLAGS) $(GTK_CFLAGS) $(CXXFLAGS)
+ifeq ($(PROFILE),)
+	PROFILE=0
+endif
+
+ifeq ($(PROFILE),0)
+	PROFILE_CFLAGS :=
+else
+	PROFILE_CFLAGS := -DREHEX_PROFILE
+endif
+
+CFLAGS          := -Wall -std=c99   -I. -Iinclude/ -IwxLua/modules/ -DREHEX_CACHE_CHARACTER_BITMAPS $(DEBUG_CFLAGS) $(PROFILE_CFLAGS) $(HELP_CFLAGS) $(CAPSTONE_CFLAGS) $(JANSSON_CFLAGS) $(LUA_CFLAGS) $(CFLAGS)
+CXXFLAGS_NO_GTK := -Wall -std=c++11 -I. -Iinclude/ -IwxLua/modules/ -DREHEX_CACHE_CHARACTER_BITMAPS $(DEBUG_CFLAGS) $(PROFILE_CFLAGS) $(HELP_CFLAGS) $(CAPSTONE_CFLAGS) $(JANSSON_CFLAGS) $(LUA_CFLAGS) $(WX_CXXFLAGS) $(CXXFLAGS)
+CXXFLAGS        := -Wall -std=c++11 -I. -Iinclude/ -IwxLua/modules/ -DREHEX_CACHE_CHARACTER_BITMAPS $(DEBUG_CFLAGS) $(PROFILE_CFLAGS) $(HELP_CFLAGS) $(CAPSTONE_CFLAGS) $(JANSSON_CFLAGS) $(LUA_CFLAGS) $(WX_CXXFLAGS) $(GTK_CFLAGS) $(CXXFLAGS)
 
 uname_S := $(shell uname -s 2>/dev/null)
 ifeq ($(uname_S),FreeBSD)
@@ -88,7 +110,7 @@ endif
 LDLIBS := -lunistring $(WX_LIBS) $(GTK_LIBS) $(CAPSTONE_LIBS) $(JANSSON_LIBS) $(LUA_LIBS) $(LDLIBS)
 
 # Define this for releases
-VERSION := 0.5.0
+VERSION := 0.5.2
 
 ifdef VERSION
 	LONG_VERSION := Version $(VERSION)
@@ -104,8 +126,8 @@ else
 	
 	GIT_COMMIT_TIME ?= $(call shell-or-die,git log -1 --format="%ct")
 	
-	VERSION      := 6000d718bba6527bb892211a2e119e94d11d8563
-	LONG_VERSION := Snapshot 6000d718bba6527bb892211a2e119e94d11d8563
+	VERSION      := 9db2df2bf978e53b876b706dca28ea3ededcbd1a
+	LONG_VERSION := Snapshot 9db2df2bf978e53b876b706dca28ea3ededcbd1a
 endif
 
 DEPDIR := .d
@@ -250,6 +272,7 @@ APP_OBJS := \
 	src/BytesPerLineDialog.o \
 	src/ByteRangeSet.o \
 	src/CharacterEncoder.o \
+	src/CharacterFinder.o \
 	src/ClickText.o \
 	src/CodeCtrl.o \
 	src/CommentTree.o \
@@ -273,6 +296,7 @@ APP_OBJS := \
 	src/LuaPluginLoader.o \
 	src/mainwindow.o \
 	src/Palette.o \
+	src/profile.o \
 	src/search.o \
 	src/SelectRangeDialog.o \
 	src/StringPanel.o \
@@ -328,6 +352,7 @@ TEST_OBJS := \
 	src/ByteRangeSet.o \
 	src/BytesPerLineDialog.o \
 	src/CharacterEncoder.o \
+	src/CharacterFinder.o \
 	src/ClickText.o \
 	src/CommentTree.o \
 	src/ConsoleBuffer.o \
@@ -361,6 +386,7 @@ TEST_OBJS := \
 	tests/ByteRangeMap.o \
 	tests/ByteRangeSet.o \
 	tests/CharacterEncoder.o \
+	tests/CharacterFinder.o \
 	tests/CommentsDataObject.o \
 	tests/CommentTree.o \
 	tests/ConsoleBuffer.o \
@@ -368,6 +394,7 @@ TEST_OBJS := \
 	tests/DisassemblyRegion.o \
 	tests/Document.o \
 	tests/DocumentCtrl.o \
+	tests/FastRectangleFiller.o \
 	tests/IntelHexExport.o \
 	tests/IntelHexImport.o \
 	tests/LuaPluginLoader.o \
@@ -453,6 +480,11 @@ tests/%.o: tests/%.cpp $(WXLUA_BINDINGS) $(GTKCONFIG_EXE)
 	$(CXX) $(CXXFLAGS) -I./googletest/include/ $(DEPFLAGS) -c -o $@ $<
 	$(DEPPOST)
 
+wxLua/%.o: wxLua/%.cpp $(WXLUA_BINDINGS)
+	$(DEPPRE)
+	$(CXX) $(CXXFLAGS) -Wno-deprecated-declarations $(DEPFLAGS) -c -o $@ $<
+	$(DEPPOST)
+
 googletest/src/%.o: googletest/src/%.cc $(GTKCONFIG_EXE)
 	$(DEPPRE)
 	$(CXX) $(CXXFLAGS) -I./googletest/include/ -I./googletest/ $(DEPFLAGS) -c -o $@ $<
@@ -502,22 +534,32 @@ PLUGINS := \
 	exe
 
 .PHONY: install
-install: $(EXE) help/rehex.htb
-	install -D -m 0755 $(EXE) $(DESTDIR)$(bindir)/$(EXE)
+install: $(EXE) $(HELP_TARGET)
+	mkdir -p $(DESTDIR)$(bindir)
+	install -m 0755 $(INSTALL_STRIP) $(EXE) $(DESTDIR)$(bindir)/$(EXE)
 	
 	for s in 16 32 48 64 128 256 512; \
 	do \
-		install -D -m 0644 res/icon$${s}.png $(DESTDIR)$(datarootdir)/icons/hicolor/$${s}x$${s}/apps/rehex.png; \
+		mkdir -p $(DESTDIR)$(datarootdir)/icons/hicolor/$${s}x$${s}/apps; \
+		install -m 0644 res/icon$${s}.png $(DESTDIR)$(datarootdir)/icons/hicolor/$${s}x$${s}/apps/rehex.png; \
 	done
 	
-	install -D -m 0644 res/rehex.desktop $(DESTDIR)$(datarootdir)/applications/rehex.desktop
+	mkdir -p $(DESTDIR)$(datarootdir)/applications
+	install -m 0644 res/rehex.desktop $(DESTDIR)$(datarootdir)/applications/rehex.desktop
 	
-	install -D -m 0644 help/rehex.htb $(DESTDIR)$(datadir)/rehex/rehex.htb
+ifneq ($(BUILD_HELP),0)
+	mkdir -p $(DESTDIR)$(datadir)/rehex
+	install -m 0644 help/rehex.htb $(DESTDIR)$(datadir)/rehex/rehex.htb
+endif
 	
 	for p in $(PLUGINS); \
 	do \
 		$(MAKE) -C plugins/$${p} install || exit $$?; \
 	done
+
+.PHONY: install-strip
+install-strip:
+	$(MAKE) INSTALL_STRIP=-s install
 
 .PHONY: uninstall
 uninstall:
@@ -550,8 +592,8 @@ else
 	git ls-files | xargs cp --parents -t rehex-$(VERSION)/
 	
 	# Inline any references to the HEAD commit sha/timestamp
-	sed -i -e "s|\$6000d718bba6527bb892211a2e119e94d11d8563|6000d718bba6527bb892211a2e119e94d11d8563|g" rehex-$(VERSION)/Makefile
-	sed -i -e "s|\$1650719202|1650719202|g" rehex-$(VERSION)/Makefile
+	sed -i -e "s|\$9db2df2bf978e53b876b706dca28ea3ededcbd1a|9db2df2bf978e53b876b706dca28ea3ededcbd1a|g" rehex-$(VERSION)/Makefile
+	sed -i -e "s|\$1656103549|1656103549|g" rehex-$(VERSION)/Makefile
 endif
 	
 	# Generate reproducible tarball. All files use git commit timestamp.
@@ -559,7 +601,7 @@ endif
 		LC_ALL=C sort -z | \
 		tar \
 			--format=ustar \
-			--mtime=@1650719202 \
+			--mtime=@1656103549 \
 			--owner=0 --group=0 --numeric-owner \
 			--no-recursion --null  -T - \
 			-cf - | \
