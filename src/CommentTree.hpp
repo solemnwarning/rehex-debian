@@ -52,16 +52,26 @@ namespace REHex {
 			struct CommentData;
 			typedef std::pair<const NestedOffsetLengthMapKey, CommentData> values_elem_t;
 			
+			struct ChildElemCompare
+			{
+				bool operator()(const values_elem_t *a, const values_elem_t *b) const
+				{
+					return a->first < b->first;
+				}
+			};
+			
 			struct CommentData
 			{
 				values_elem_t *parent;
-				std::set<values_elem_t*> children;
+				std::set<values_elem_t*, ChildElemCompare> children;
 				
-				CommentData(values_elem_t *parent): parent(parent) {}
+				std::shared_ptr<const wxString> text;
+				
+				CommentData(values_elem_t *parent, const std::shared_ptr<const wxString> &text): parent(parent), text(text) {}
 			};
 			
 			std::map<NestedOffsetLengthMapKey, CommentData> values;
-			std::set<values_elem_t*> root;
+			std::set<values_elem_t*, ChildElemCompare> root;
 			
 			std::map<NestedOffsetLengthMapKey, CommentData>::iterator erase_value(std::map<NestedOffsetLengthMapKey, CommentData>::iterator value_i);
 	};
