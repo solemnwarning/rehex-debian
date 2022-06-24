@@ -12,7 +12,7 @@
 	<string>net.solemnwarning.rehex</string>
 	
 	<key>CFBundleVersion</key>
-	<string>0.5.0</string>
+	<string>0.5.2</string>
 	
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
@@ -24,7 +24,7 @@
 	<string>REHex</string>
 	
 	<key>LSMinimumSystemVersion</key>
-	<string>10.10</string>
+	<string>10.13</string>
 	
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>

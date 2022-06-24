@@ -1,5 +1,5 @@
 /* Reverse Engineer's Hex Editor
- * Copyright (C) 2017-2021 Daniel Collins <solemnwarning@solemnwarning.net>
+ * Copyright (C) 2017-2022 Daniel Collins <solemnwarning@solemnwarning.net>
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 as published by
@@ -23,6 +23,7 @@
 #include <list>
 #include <memory>
 #include <stdint.h>
+#include <unitypes.h>
 #include <utility>
 #include <vector>
 #include <wx/dataobj.h>
@@ -30,6 +31,7 @@
 
 #include "buffer.hpp"
 #include "ByteRangeSet.hpp"
+#include "CharacterFinder.hpp"
 #include "document.hpp"
 #include "Events.hpp"
 #include "LRUCache.hpp"
@@ -110,22 +112,17 @@ namespace REHex {
 						public:
 							const bool enable;
 							
-							const Palette::ColourIndex fg_colour_idx;
-							const Palette::ColourIndex bg_colour_idx;
-							const bool strong;
+							const wxColour fg_colour;
+							const wxColour bg_colour;
 							
-							Highlight(Palette::ColourIndex fg_colour_idx, Palette::ColourIndex bg_colour_idx, bool strong):
+							Highlight(const wxColour &fg_colour, const wxColour &bg_colour):
 								enable(true),
-								fg_colour_idx(fg_colour_idx),
-								bg_colour_idx(bg_colour_idx),
-								strong(strong) {}
+								fg_colour(fg_colour),
+								bg_colour(bg_colour) {}
 						
 						protected:
 							Highlight():
-								enable(false),
-								fg_colour_idx(Palette::PAL_INVALID),
-								bg_colour_idx(Palette::PAL_INVALID),
-								strong(false) {}
+								enable(false) {}
 					};
 					
 					struct NoHighlight: Highlight
@@ -161,11 +158,13 @@ namespace REHex {
 			class GenericDataRegion: public Region
 			{
 				protected:
-					GenericDataRegion(off_t d_offset, off_t d_length, off_t indent_offset);
+					GenericDataRegion(off_t d_offset, off_t d_length, off_t virt_offset, off_t indent_offset);
 					
 				public:
 					const off_t d_offset;
 					const off_t d_length;
+					
+					const off_t virt_offset;
 					
 					/**
 					 * @brief Represents an on-screen area of the region.
@@ -198,32 +197,32 @@ namespace REHex {
 					/**
 					 * @brief Returns the offset of the cursor position left of the given offset. May return CURSOR_PREV_REGION.
 					*/
-					virtual off_t cursor_left_from(off_t pos) = 0;
+					virtual off_t cursor_left_from(off_t pos, ScreenArea active_type) = 0;
 					
 					/**
 					 * @brief Returns the offset of the cursor position right of the given offset. May return CURSOR_NEXT_REGION.
 					*/
-					virtual off_t cursor_right_from(off_t pos) = 0;
+					virtual off_t cursor_right_from(off_t pos, ScreenArea active_type) = 0;
 					
 					/**
 					 * @brief Returns the offset of the cursor position up from the given offset. May return CURSOR_PREV_REGION.
 					*/
-					virtual off_t cursor_up_from(off_t pos) = 0;
+					virtual off_t cursor_up_from(off_t pos, ScreenArea active_type) = 0;
 					
 					/**
 					 * @brief Returns the offset of the cursor position down from the given offset. May return CURSOR_NEXT_REGION.
 					*/
-					virtual off_t cursor_down_from(off_t pos) = 0;
+					virtual off_t cursor_down_from(off_t pos, ScreenArea active_type) = 0;
 					
 					/**
 					 * @brief Returns the offset of the cursor position at the start of the line from the given offset.
 					*/
-					virtual off_t cursor_home_from(off_t pos) = 0;
+					virtual off_t cursor_home_from(off_t pos, ScreenArea active_type) = 0;
 					
 					/**
 					 * @brief Returns the offset of the cursor position at the end of the line from the given offset.
 					*/
-					virtual off_t cursor_end_from(off_t pos) = 0;
+					virtual off_t cursor_end_from(off_t pos, ScreenArea active_type) = 0;
 					
 					/**
 					 * @brief Returns the screen column index of the given offset within the region.
@@ -314,7 +313,7 @@ namespace REHex {
 			class DataRegion: public GenericDataRegion
 			{
 				protected:
-					off_t virt_offset;
+					SharedDocumentPointer document;
 					
 					int offset_text_x;  /* Virtual X coord of left edge of offsets. */
 					int hex_text_x;     /* Virtual X coord of left edge of hex data. */
@@ -324,7 +323,7 @@ namespace REHex {
 					unsigned int first_line_pad_bytes;   /* Number of bytes to pad first line with. */
 					
 				public:
-					DataRegion(off_t d_offset, off_t d_length, off_t virt_offset);
+					DataRegion(SharedDocumentPointer &document, off_t d_offset, off_t d_length, off_t virt_offset);
 					
 					int calc_width_for_bytes(DocumentCtrl &doc_ctrl, unsigned int line_bytes) const;
 					
@@ -343,12 +342,12 @@ namespace REHex {
 					virtual std::pair<off_t, ScreenArea> offset_at_xy(DocumentCtrl &doc, int mouse_x_px, int64_t mouse_y_lines) override;
 					virtual std::pair<off_t, ScreenArea> offset_near_xy(DocumentCtrl &doc, int mouse_x_px, int64_t mouse_y_lines, ScreenArea type_hint) override;
 					
-					virtual off_t cursor_left_from(off_t pos) override;
-					virtual off_t cursor_right_from(off_t pos) override;
-					virtual off_t cursor_up_from(off_t pos) override;
-					virtual off_t cursor_down_from(off_t pos) override;
-					virtual off_t cursor_home_from(off_t pos) override;
-					virtual off_t cursor_end_from(off_t pos) override;
+					virtual off_t cursor_left_from(off_t pos, ScreenArea active_type) override;
+					virtual off_t cursor_right_from(off_t pos, ScreenArea active_type) override;
+					virtual off_t cursor_up_from(off_t pos, ScreenArea active_type) override;
+					virtual off_t cursor_down_from(off_t pos, ScreenArea active_type) override;
+					virtual off_t cursor_home_from(off_t pos, ScreenArea active_type) override;
+					virtual off_t cursor_end_from(off_t pos, ScreenArea active_type) override;
 					
 					virtual int cursor_column(off_t pos) override;
 					virtual off_t first_row_nearest_column(int column) override;
@@ -360,16 +359,17 @@ namespace REHex {
 					
 					virtual Highlight highlight_at_off(off_t off) const;
 					
+				private:
+					std::unique_ptr<CharacterFinder> char_finder;
+					std::pair<off_t,off_t> get_char_at(off_t offset);
+					
 				friend DocumentCtrl;
 			};
 			
 			class DataRegionDocHighlight: public DataRegion
 			{
-				private:
-					Document &doc;
-					
 				public:
-					DataRegionDocHighlight(off_t d_offset, off_t d_length, off_t virt_offset, Document &doc);
+					DataRegionDocHighlight(SharedDocumentPointer &document, off_t d_offset, off_t d_length, off_t virt_offset);
 					
 				protected:
 					virtual Highlight highlight_at_off(off_t off) const override;
@@ -391,6 +391,17 @@ namespace REHex {
 				CommentRegion(off_t c_offset, off_t c_length, const wxString &c_text, bool truncate, off_t indent_offset, off_t indent_length);
 				
 				friend DocumentCtrl;
+			};
+
+			struct AlignedCharacter
+			{
+				wxString wx_char;
+				ucs4_t unicode_char;
+				wxSize char_size;
+				int column;
+
+				AlignedCharacter(wxString wx_char, ucs4_t unicode_char, wxSize char_size, int column) :
+					wx_char(wx_char), unicode_char(unicode_char), char_size(char_size), column(column) {}
 			};
 			
 			DocumentCtrl(wxWindow *parent, SharedDocumentPointer &doc);
@@ -580,6 +591,9 @@ namespace REHex {
 			/** List of iterators into data_regions, sorted by d_offset. */
 			std::vector< std::vector<GenericDataRegion*>::iterator > data_regions_sorted;
 			
+			/** Maximum virtual offset in data regions (plus one). */
+			off_t end_virt_offset;
+			
 			/* Fixed-width font used for drawing hex data. */
 			wxFont hex_font;
 			
@@ -644,6 +658,8 @@ namespace REHex {
 			Document::CursorState cursor_state;
 			
 			void _set_cursor_position(off_t position, Document::CursorState cursor_state, bool preserve_cpos_hist = false);
+			
+			GenericDataRegion::ScreenArea _get_screen_area_for_cursor_state();
 			
 			std::vector<GenericDataRegion*>::iterator _data_region_by_offset(off_t offset);
 			
@@ -714,7 +730,69 @@ namespace REHex {
 			unsigned int hf_string_width_precomp[PRECOMP_HF_STRING_WIDTH_TO];
 			
 			static const size_t GETTEXTEXTENT_CACHE_SIZE = 4096;
-			LRUCache<std::string, wxSize> hf_gte_cache;
+			LRUCache<ucs4_t, wxSize> hf_gte_cache;
+
+#ifdef REHEX_CACHE_CHARACTER_BITMAPS
+			static const size_t HF_CHAR_BITMAP_CACHE_SIZE = 8192;
+			LRUCache<std::tuple<ucs4_t, unsigned int, unsigned int>, wxBitmap> hf_char_bitmap_cache;
+#endif
+
+#ifdef REHEX_CACHE_STRING_BITMAPS
+			struct StringBitmapCacheKey
+			{
+				int base_col;
+				std::vector<AlignedCharacter> characters;
+				unsigned int packed_fg_colour;
+				unsigned int packed_bg_colour;
+
+				StringBitmapCacheKey(int base_col, std::vector<AlignedCharacter> characters, unsigned int packed_fg_colour, unsigned int packed_bg_colour):
+					base_col(base_col), characters(characters), packed_fg_colour(packed_fg_colour), packed_bg_colour(packed_bg_colour) {}
+
+				bool operator<(const StringBitmapCacheKey &rhs) const
+				{
+					if(base_col != rhs.base_col)
+					{
+						return base_col < rhs.base_col;
+					}
+					
+					for(size_t i = 0;; ++i)
+					{
+						if(i < characters.size() && i < rhs.characters.size())
+						{
+							if(characters[i].unicode_char != rhs.characters[i].unicode_char)
+							{
+								return characters[i].unicode_char < rhs.characters[i].unicode_char;
+							}
+							else if(characters[i].column != rhs.characters[i].column)
+							{
+								return characters[i].column < rhs.characters[i].column;
+							}
+						}
+						else if(i < characters.size())
+						{
+							return false;
+						}
+						else if(i < rhs.characters.size())
+						{
+							return true;
+						}
+						else {
+							break;
+						}
+					}
+
+					if(packed_fg_colour != rhs.packed_fg_colour)
+					{
+						return packed_fg_colour < rhs.packed_fg_colour;
+					}
+
+					return packed_bg_colour < rhs.packed_bg_colour;
+				}
+			};
+
+			static const size_t HF_STRING_BITMAP_CACHE_SIZE = 256;
+			LRUCache<StringBitmapCacheKey, wxBitmap> hf_string_bitmap_cache;
+#endif
 			
 		public:
 			static std::list<wxString> format_text(const wxString &text, unsigned int cols, unsigned int from_line = 0, unsigned int max_lines = -1);
@@ -722,11 +800,20 @@ namespace REHex {
 			int get_offset_column_width();
 			int get_virtual_width();
 			bool get_cursor_visible();
+			off_t get_end_virt_offset() const;
 			
 			int hf_char_width();
 			int hf_char_height();
 			int hf_string_width(int length);
 			int hf_char_at_x(int x_px);
+
+#ifdef REHEX_CACHE_CHARACTER_BITMAPS
+			wxBitmap hf_char_bitmap(const wxString &wx_char, ucs4_t unicode_char, const wxSize &char_size, const wxColour &foreground_colour, const wxColour &background_colour);
+#endif
+
+#ifdef REHEX_CACHE_STRING_BITMAPS
+			wxBitmap hf_string_bitmap(const std::vector<AlignedCharacter> &characters, int base_col, const wxColour &foreground_colour, const wxColour &background_colour);
+#endif
 			
 			/* Stays at the bottom because it changes the protection... */
 			DECLARE_EVENT_TABLE()
