@@ -1,5 +1,5 @@
 /* Reverse Engineer's Hex Editor
- * Copyright (C) 2021 Daniel Collins <solemnwarning@solemnwarning.net>
+ * Copyright (C) 2021-2022 Daniel Collins <solemnwarning@solemnwarning.net>
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 as published by
@@ -18,6 +18,7 @@
 #ifndef REHEX_LRUCACHE_HPP
 #define REHEX_LRUCACHE_HPP
 
+#include <assert.h>
 #include <list>
 #include <map>
 
@@ -60,7 +61,7 @@ namespace REHex
 			/**
 			 * @brief Store a value in the cache.
 			*/
-			void set(const K &k, const V &v);
+			const V *set(const K &k, const V &v);
 			
 			/**
 			 * @brief Remove all values from the cache.
@@ -83,17 +84,21 @@ template<typename K, typename V> const V *REHex::LRUCache<K,V>::get(const K &k) 
 	}
 }
 
-template<typename K, typename V> void REHex::LRUCache<K,V>::set(const K &k, const V &v)
+template<typename K, typename V> const V *REHex::LRUCache<K,V>::set(const K &k, const V &v)
 {
 	/* Check if we already have this key, and move it to the front of queue if we do. */
 	const V *old_v = get(k);
 	
 	if(old_v != NULL)
 	{
-		/* Update the existing value. */
+		/* Replace the existing value. */
 		
-		assert(queue.front().first == k);
-		queue.front().second = v;
+		assert(!(queue.front().first < k || k < queue.front().first));
+
+		queue.pop_front();
+		
+		queue.push_front(std::make_pair(k, v));
+		map[k] = queue.begin();
 	}
 	else{
 		/* Make space to keep us under the limit (if necessary) and add the new element. */
@@ -107,6 +112,8 @@ template<typename K, typename V> void REHex::LRUCache<K,V>::set(const K &k, cons
 		queue.push_front(std::make_pair(k, v));
 		map[k] = queue.begin();
 	}
+
+	return &(queue.front().second);
 }
 
 template<typename K, typename V> void REHex::LRUCache<K,V>::clear()

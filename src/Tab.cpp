@@ -693,8 +693,16 @@ void REHex::Tab::OnDocumentCtrlChar(wxKeyEvent &event)
 			 * inserting or overwriting at the next byte.
 			*/
 			
-			std::vector<unsigned char> cur_data = doc->read_data(cursor_pos, 1);
-			assert(cur_data.size() == 1);
+			std::vector<unsigned char> cur_data;
+			try {
+				cur_data = doc->read_data(cursor_pos, 1);
+				assert(cur_data.size() == 1);
+			}
+			catch(const std::exception &e)
+			{
+				wxGetApp().printf_error("Exception in REHex::Tab::OnDocumentCtrlChar: %s\n", e.what());
+				return;
+			}
 			
 			unsigned char old_byte = cur_data[0];
 			unsigned char new_byte = (old_byte & 0xF0) | nibble;
@@ -715,7 +723,15 @@ void REHex::Tab::OnDocumentCtrlChar(wxKeyEvent &event)
 			 * overwriting the least significant.
 			*/
 			
-			std::vector<unsigned char> cur_data = doc->read_data(cursor_pos, 1);
+			std::vector<unsigned char> cur_data;
+			try {
+				cur_data = doc->read_data(cursor_pos, 1);
+			}
+			catch(const std::exception &e)
+			{
+				wxGetApp().printf_error("Exception in REHex::Tab::OnDocumentCtrlChar: %s\n", e.what());
+				return;
+			}
 			
 			if(!cur_data.empty())
 			{
@@ -730,7 +746,7 @@ void REHex::Tab::OnDocumentCtrlChar(wxKeyEvent &event)
 		
 		return;
 	}
-	else if(doc_ctrl->ascii_view_active() && (modifiers == wxMOD_NONE || modifiers == wxMOD_SHIFT) && ukey != WXK_NONE)
+	else if(doc_ctrl->ascii_view_active() && (modifiers == wxMOD_NONE || modifiers == wxMOD_SHIFT) && ukey != WXK_NONE && key != '\t')
 	{
 		wxCharBuffer utf8_buf = wxString(wxUniChar(ukey)).utf8_str();
 		std::string utf8_key(utf8_buf.data(), utf8_buf.length());
@@ -1646,7 +1662,7 @@ void REHex::Tab::repopulate_regions()
 			assert(doc->buffer_length() == 0);
 			
 			/* Empty buffers need a data region too! */
-			file_regions.push_back(new DocumentCtrl::DataRegionDocHighlight(0, 0, 0, *doc));
+			file_regions.push_back(new DocumentCtrl::DataRegionDocHighlight(doc, 0, 0, 0));
 		}
 		else if(dynamic_cast<DocumentCtrl::DataRegionDocHighlight*>(file_regions.back()) == NULL)
 		{
@@ -1655,7 +1671,7 @@ void REHex::Tab::repopulate_regions()
 			 * insert more data at the end.
 			*/
 			
-			file_regions.push_back(new DocumentCtrl::DataRegionDocHighlight(doc->buffer_length(), 0, doc->buffer_length(), *doc));
+			file_regions.push_back(new DocumentCtrl::DataRegionDocHighlight(doc, doc->buffer_length(), 0, doc->buffer_length()));
 		}
 		
 		regions.insert(regions.end(), file_regions.begin(), file_regions.end());
@@ -1778,7 +1794,7 @@ std::vector<REHex::DocumentCtrl::Region*> REHex::Tab::compute_regions(SharedDocu
 			regions.push_back(dtr->region_factory(doc, next_data, dr_length, next_virt));
 		}
 		else{
-			regions.push_back(new DocumentCtrl::DataRegionDocHighlight(next_data, dr_length, next_virt, *doc));
+			regions.push_back(new DocumentCtrl::DataRegionDocHighlight(doc, next_data, dr_length, next_virt));
 		}
 		
 		next_data   += dr_length;
