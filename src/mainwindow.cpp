@@ -181,7 +181,9 @@ BEGIN_EVENT_TABLE(REHex::MainWindow, wxFrame)
 	
 	EVT_MENU(ID_GITHUB,  REHex::MainWindow::OnGithub)
 	EVT_MENU(ID_DONATE,  REHex::MainWindow::OnDonate)
+	#ifdef BUILD_HELP
 	EVT_MENU(ID_HELP,    REHex::MainWindow::OnHelp)
+	#endif
 	EVT_MENU(wxID_ABOUT, REHex::MainWindow::OnAbout)
 	
 	EVT_AUINOTEBOOK_PAGE_CHANGED(  wxID_ANY, REHex::MainWindow::OnDocumentChange)
@@ -458,7 +460,9 @@ REHex::MainWindow::MainWindow(const wxSize& size):
 		
 		call_setup_hooks(SetupPhase::HELP_MENU_TOP);
 		
+		#ifdef BUILD_HELP
 		help_menu->Append(ID_HELP, "View &help\tF1");
+		#endif
 		help_menu->Append(ID_GITHUB, "Visit &Github page");
 		help_menu->Append(ID_DONATE, "Donate with &Paypal");
 		help_menu->Append(wxID_ABOUT, "&About");
@@ -1160,14 +1164,58 @@ void REHex::MainWindow::OnGotoOffset(wxCommandEvent &event)
 	off_t current_pos = tab->doc->get_cursor_position();
 	off_t max_pos     = tab->doc->buffer_length() - !tab->doc_ctrl->get_insert_mode();
 	
+	NumericEntryDialog<off_t>::BaseHint base;
+	switch(wxGetApp().settings->get_goto_offset_base())
+	{
+		case GotoOffsetBase::AUTO:
+			base = NumericEntryDialog<off_t>::BaseHint::AUTO;
+			break;
+		
+		case GotoOffsetBase::OCT:
+			base = NumericEntryDialog<off_t>::BaseHint::OCT;
+			break;
+		
+		case GotoOffsetBase::DEC:
+			base = NumericEntryDialog<off_t>::BaseHint::DEC;
+			break;
+		
+		case GotoOffsetBase::HEX:
+			base = NumericEntryDialog<off_t>::BaseHint::HEX;
+			break;
+	}
+	
 	REHex::NumericEntryDialog<off_t> ni(this,
 		"Jump to offset",
 		"Prefix offset with -/+ to jump relative to current cursor position",
-		current_pos, 0, max_pos, current_pos);
+		current_pos, 0, max_pos, current_pos, base);
 	
 	int rc = ni.ShowModal();
 	if(rc == wxID_OK)
 	{
+		base = ni.GetBase();
+		switch(base)
+		{
+			case NumericEntryDialog<off_t>::BaseHint::AUTO:
+				wxGetApp().settings->set_goto_offset_base(GotoOffsetBase::AUTO);
+				break;
+				
+			case NumericEntryDialog<off_t>::BaseHint::OCT:
+				wxGetApp().settings->set_goto_offset_base(GotoOffsetBase::OCT);
+				break;
+				
+			case NumericEntryDialog<off_t>::BaseHint::DEC:
+				wxGetApp().settings->set_goto_offset_base(GotoOffsetBase::DEC);
+				break;
+				
+			case NumericEntryDialog<off_t>::BaseHint::HEX:
+				wxGetApp().settings->set_goto_offset_base(GotoOffsetBase::HEX);
+				break;
+				
+			default:
+				/* Unreachable. */
+				abort();
+		}
+		
 		tab->doc->set_cursor_position(ni.GetValue());
 	}
 }
@@ -1545,7 +1593,6 @@ void REHex::MainWindow::OnSaveView(wxCommandEvent &event)
 	config->Write("theme", wxString(active_palette->get_name()));
 	config->Write("font-size-adjustment", (long)(wxGetApp().get_font_size_adjustment()));
 	config->Write("font-name", wxString(wxGetApp().get_font_name()));
-	wxGetApp().settings->write(config);
 	
 	// Clean out all previous settings
 	config->DeleteGroup("/default-view/");
@@ -1574,10 +1621,12 @@ void REHex::MainWindow::OnDonate(wxCommandEvent &event)
 	wxLaunchDefaultBrowser("https://www.solemnwarning.net/rehex/donate");
 }
 
+#ifdef BUILD_HELP
 void REHex::MainWindow::OnHelp(wxCommandEvent &event)
 {
 	wxGetApp().show_help_contents(this);
 }
+#endif
 
 void REHex::MainWindow::OnAbout(wxCommandEvent &event)
 {
@@ -1653,6 +1702,9 @@ void REHex::MainWindow::OnDocumentChange(wxAuiNotebookEvent& event)
 		case DDM_VIRTUAL:
 			view_menu->Check(ID_DDM_VIRTUAL, true);
 			break;
+			
+		default:
+			abort(); /* Unreachable */
 	}
 	
 	view_menu->Check(ID_HIGHLIGHT_SELECTION_MATCH, tab->doc_ctrl->get_highlight_selection_match());

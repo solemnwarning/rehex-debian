@@ -16,32 +16,39 @@
 
 _rehex_capstone_version="4.0.2"
 _rehex_capstone_url="https://github.com/aquynh/capstone/archive/${_rehex_capstone_version}.tar.gz"
-_rehex_capstone_build_ident="${_rehex_capstone_version}-1"
+_rehex_capstone_sha256="7c81d798022f81e7507f1a60d6817f63aa76e489aa4e7055255f21a22f5e526a"
+_rehex_capstone_build_ident="${_rehex_capstone_version}-2"
 
 _rehex_jansson_version="2.14"
 _rehex_jansson_url="https://github.com/akheron/jansson/releases/download/v${_rehex_jansson_version}/jansson-${_rehex_jansson_version}.tar.gz"
-_rehex_jansson_build_ident="${_rehex_jansson_version}-1"
+_rehex_jansson_sha256="5798d010e41cf8d76b66236cfb2f2543c8d082181d16bc3085ab49538d4b9929"
+_rehex_jansson_build_ident="${_rehex_jansson_version}-2"
 
 _rehex_libunistring_version="0.9.10"
 _rehex_libunistring_url="https://ftp.gnu.org/gnu/libunistring/libunistring-${_rehex_libunistring_version}.tar.gz"
-_rehex_libunistring_build_ident="${_rehex_libunistring_version}-1"
+_rehex_libunistring_sha256="a82e5b333339a88ea4608e4635479a1cfb2e01aafb925e1290b65710d43f610b"
+_rehex_libunistring_build_ident="${_rehex_libunistring_version}-2"
 
 _rehex_lua_version="5.3.6"
 _rehex_lua_url="https://www.lua.org/ftp/lua-${_rehex_lua_version}.tar.gz"
-_rehex_lua_build_ident="${_rehex_lua_version}-2"
+_rehex_lua_sha256="fc5fd69bb8736323f026672b1b7235da613d7177e72558893a0bdcd320466d60"
+_rehex_lua_build_ident="${_rehex_lua_version}-3"
 
 _rehex_luarocks_version="3.8.0"
 _rehex_luarocks_url="https://luarocks.org/releases/luarocks-${_rehex_luarocks_version}.tar.gz"
+_rehex_luarocks_sha256="56ab9b90f5acbc42eb7a94cf482e6c058a63e8a1effdf572b8b2a6323a06d923"
 
 _rehex_wxwidgets_version="3.1.5"
 _rehex_wxwidgets_url="https://github.com/wxWidgets/wxWidgets/releases/download/v${_rehex_wxwidgets_version}/wxWidgets-${_rehex_wxwidgets_version}.tar.bz2"
-_rehex_wxwidgets_build_ident="${_rehex_wxwidgets_version}-2"
+_rehex_wxwidgets_sha256="d7b3666de33aa5c10ea41bb9405c40326e1aeb74ee725bb88f90f1d50270a224"
+_rehex_wxwidgets_build_ident="${_rehex_wxwidgets_version}-3"
 
 _rehex_cpanm_version="1.7044"
 _rehex_cpanm_url="https://cpan.metacpan.org/authors/id/M/MI/MIYAGAWA/App-cpanminus-${_rehex_cpanm_version}.tar.gz"
-_rehex_perl_libs_build_ident="1"
+_rehex_cpanm_sha256="9b60767fe40752ef7a9d3f13f19060a63389a5c23acc3e9827e19b75500f81f3"
+_rehex_perl_libs_build_ident="2"
 
-_rehex_macos_version_min=10.10
+_rehex_macos_version_min=10.13
 
 _rehex_ok=1
 
@@ -109,6 +116,8 @@ then
 			curl -Lo "${_rehex_capstone_tar}" "${_rehex_capstone_url}"
 		fi
 		
+		echo "${_rehex_capstone_sha256}  ${_rehex_capstone_tar}" | shasum -c
+		
 		mkdir -p "capstone-${_rehex_capstone_build_ident}"
 		
 		tar -xf "${_rehex_capstone_tar}" -C "capstone-${_rehex_capstone_build_ident}"
@@ -141,6 +150,8 @@ then
 			echo "Downloading ${_rehex_jansson_url}"
 			curl -Lo "${_rehex_jansson_tar}" "${_rehex_jansson_url}"
 		fi
+		
+		echo "${_rehex_jansson_sha256}  ${_rehex_jansson_tar}" | shasum -c
 		
 		mkdir -p "jansson-${_rehex_jansson_build_ident}"
 		
@@ -178,6 +189,8 @@ then
 			curl -Lo "${_rehex_libunistring_tar}" "${_rehex_libunistring_url}"
 		fi
 		
+		echo "${_rehex_libunistring_sha256}  ${_rehex_libunistring_tar}" | shasum -c
+		
 		mkdir -p "libunistring-${_rehex_libunistring_build_ident}"
 		
 		tar -xf "${_rehex_libunistring_tar}" -C "libunistring-${_rehex_libunistring_build_ident}"
@@ -214,12 +227,14 @@ then
 			curl -Lo "${_rehex_lua_tar}" "${_rehex_lua_url}"
 		fi
 		
+		echo "${_rehex_lua_sha256}  ${_rehex_lua_tar}" | shasum -c
+		
 		mkdir -p "lua-${_rehex_lua_build_ident}"
 		
 		tar -xf "${_rehex_lua_tar}" -C "lua-${_rehex_lua_build_ident}"
 		cd "lua-${_rehex_lua_build_ident}/lua-${_rehex_lua_version}"
 		
-		make -j$(sysctl -n hw.logicalcpu) macosx
+		make -j$(sysctl -n hw.logicalcpu) macosx MYCFLAGS="-mmacosx-version-min=${_rehex_macos_version_min}"
 		make -j$(sysctl -n hw.logicalcpu) test
 		make -j$(sysctl -n hw.logicalcpu) install INSTALL_TOP="${_rehex_lua_target_dir}"
 		
@@ -234,6 +249,8 @@ then
 			echo "Downloading ${_rehex_luarocks_url}"
 			curl -Lo "${_rehex_luarocks_tar}" "${_rehex_luarocks_url}"
 		fi
+		
+		echo "${_rehex_luarocks_sha256}  ${_rehex_luarocks_tar}" | shasum -c
 		
 		tar -xf "${_rehex_luarocks_tar}" -C "lua-${_rehex_lua_build_ident}"
 		cd "lua-${_rehex_lua_build_ident}/luarocks-${_rehex_luarocks_version}"
@@ -271,6 +288,8 @@ then
 			curl -Lo "${_rehex_wxwidgets_tar}" "${_rehex_wxwidgets_url}"
 		fi
 		
+		echo "${_rehex_wxwidgets_sha256}  ${_rehex_wxwidgets_tar}" | shasum -c
+		
 		mkdir -p "wxwidgets-${_rehex_wxwidgets_build_ident}"
 		
 		tar -xf "${_rehex_wxwidgets_tar}" -C "wxwidgets-${_rehex_wxwidgets_build_ident}"
@@ -284,6 +303,7 @@ then
 			--with-libpng=builtin \
 			--with-libtiff=no \
 			--with-regex=builtin \
+			--with-liblzma=no \
 			-enable-cxx11 \
 			-with-macosx-version-min="${_rehex_macos_version_min}" \
 			CXXFLAGS="-stdlib=libc++" \
@@ -313,6 +333,8 @@ then
 			echo "Downloading ${_rehex_cpanm_url}"
 			curl -Lo "${_rehex_cpanm_tar}" "${_rehex_cpanm_url}"
 		fi
+		
+		echo "${_rehex_cpanm_sha256}  ${_rehex_cpanm_tar}" | shasum -c
 		
 		mkdir -p "cpanm-${_rehex_cpanm_build_ident}"
 		
@@ -357,7 +379,8 @@ EOF
 	
 	export WX_CONFIG="${_rehex_wxwidgets_target_dir}/bin/wx-config"
 	
-	export CXXFLAGS="-I${_rehex_libunistring_target_dir}/include/"
+	export CFLAGS="-mmacosx-version-min=${_rehex_macos_version_min}"
+	export CXXFLAGS="-I${_rehex_libunistring_target_dir}/include/ -mmacosx-version-min=${_rehex_macos_version_min}"
 	export LDLIBS="-L${_rehex_libunistring_target_dir}/lib/ -lunistring"
 	
 	export PERL="perl -I\"$(dirname "$(find "${_rehex_perl_libs_target_dir}" -name Template.pm)")\""
@@ -376,28 +399,35 @@ unset _rehex_ok
 unset _rehex_macos_version_min
 
 unset _rehex_perl_libs_build_ident
+unset _rehex_cpanm_sha256
 unset _rehex_cpanm_url
 unset _rehex_cpanm_version
 
 unset _rehex_wxwidgets_build_ident
+unset _rehex_wxwidgets_sha256
 unset _rehex_wxwidgets_url
 unset _rehex_wxwidgets_version
 
+unset _rehex_luarocks_sha256
 unset _rehex_luarocks_url
 unset _rehex_luarocks_version
 
 unset _rehex_lua_build_ident
+unset _rehex_lua_sha256
 unset _rehex_lua_url
 unset _rehex_lua_version
 
 unset _rehex_libunistring_build_ident
+unset _rehex_libunistring_sha256
 unset _rehex_libunistring_url
 unset _rehex_libunistring_version
 
 unset _rehex_jansson_build_ident
+unset _rehex_jansson_sha256
 unset _rehex_jansson_url
 unset _rehex_jansson_version
 
 unset _rehex_capstone_build_ident
+unset _rehex_capstone_sha256
 unset _rehex_capstone_url
 unset _rehex_capstone_version

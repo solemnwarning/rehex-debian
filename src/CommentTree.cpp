@@ -266,8 +266,24 @@ void REHex::CommentTreeModel::refresh_comments()
 			
 			values_elem_t *parent = parents.empty() ? NULL : parents.top();
 			
-			auto x = values.emplace(std::make_pair(c->first, CommentData(parent)));
+			auto x = values.emplace(std::make_pair(c->first, CommentData(parent, c->second.text)));
 			values_elem_t *value = &(*(x.first));
+			
+			if(value->second.parent != parent)
+			{
+				/* Remove the item so we can re-add it if a new parent has been
+				 * created around it.
+				*/
+				
+				assert(!x.second);
+				
+				erase_value(x.first);
+				
+				x = values.emplace(std::make_pair(c->first, CommentData(parent, c->second.text)));
+				value = &(*(x.first));
+				
+				assert(x.second);
+			}
 			
 			parents.push(value);
 			
@@ -285,6 +301,13 @@ void REHex::CommentTreeModel::refresh_comments()
 				
 				ItemAdded(wxDataViewItem(parent), wxDataViewItem((void*)(value)));
 			}
+			else if(value->second.text.get() != c->second.text.get())
+			{
+				/* Text has changed. */
+				
+				value->second.text = c->second.text;
+				ItemChanged(wxDataViewItem((void*)(value)));
+			}
 		} while(c != offset_base);
 		
 		offset_base = next_offset;
@@ -301,7 +324,7 @@ std::map<REHex::NestedOffsetLengthMapKey, REHex::CommentTreeModel::CommentData>:
 	values_elem_t *value  = &(*value_i);
 	values_elem_t *parent = value->second.parent;
 	
-	for(std::set<values_elem_t*>::iterator c; (c = value->second.children.begin()) != value->second.children.end();)
+	for(std::set<values_elem_t*, ChildElemCompare>::iterator c; (c = value->second.children.begin()) != value->second.children.end();)
 	{
 		values_elem_t *child = *c;
 		erase_value(values.find(child->first));
