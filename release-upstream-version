@@ -1,0 +1,231 @@
+#!/usr/bin/perl
+
+use strict;
+use warnings;
+
+use File::Temp;
+use FindBin;
+use JSON;
+use POSIX qw(WIFEXITED WEXITSTATUS);
+
+my $DEBIAN_REPO_URL   = "git\@github.com:solemnwarning/rehex-debian.git";
+my $UPSTREAM_REPO_URL = "https://github.com/solemnwarning/rehex.git";
+
+my $repo_root = $FindBin::Bin;
+
+my ($version, $changelog_text_file, @branches) = @ARGV;
+
+die "Usage: $0 <version> <changelog file> [<branch> ...]\n"
+	unless((scalar @ARGV) >= 2);
+
+my $changelog_text = read_changelog_text($changelog_text_file);
+
+my $branches = read_branches("$repo_root/branches.json");
+
+foreach my $branch(@branches)
+{
+	die "Unknown branch $branch specified on command line\n"
+		unless(defined $branches->{$branch});
+}
+
+# Update all branches if none specified on command line.
+@branches = sort keys(%$branches) unless(@branches);
+
+my $clone_root = File::Temp->newdir(CLEANUP => 0);
+
+print "> Cloning repository...\n";
+
+system("git", "clone", $DEBIAN_REPO_URL, "$clone_root")
+	and die "Unexpected exit code from `git clone $DEBIAN_REPO_URL $clone_root`\n";
+
+chdir($clone_root)
+	or die "chdir($clone_root): $!\n";
+
+system("git", "remote", "add", "rehex", $UPSTREAM_REPO_URL)
+	and die "Unexpected exit code from `git remote add rehex $UPSTREAM_REPO_URL`\n";
+
+system("git", "fetch", "rehex", "refs/tags/$version:refs/tags/$version")
+	and die "Unexpected exit code from `git fetch rehex 'refs/tags/$version:refs/tags/$version'`\n";
+
+my $upstream_tag = "upstream/$version";
+
+print "> Creating upstream/$version tag...\n";
+
+if(!tag_exists($upstream_tag, $version))
+{
+	system("git", "tag", $upstream_tag, $version)
+		and die "Unexpected exit status from `git tag $upstream_tag $version`\n";
+}
+
+my @refs_to_push = (
+	# Push the upstream/<VERSION> tag later.
+	$upstream_tag,
+);
+
+foreach my $branch_name(@branches)
+{
+	print "> Checking branch $branch_name...\n";
+	
+	my $distribution = $branches->{$branch_name}->{"distribution"};
+	my $base_release = $branches->{$branch_name}->{"base-release"};
+	
+	my $debian_version = "${version}-${base_release}";
+	my $debian_tag = "debian/".($debian_version =~ s/~/_/gr);
+	
+	# Switch branch
+	system("git", "checkout", $branch_name)
+		and die "Unexpected exit status from `git checkout $branch_name`\n";
+	
+	# Merge upstream, will no-op if already done.
+	system("git", "merge", "--no-ff", "-s", "recursive", "-X", "theirs", "--no-edit", $upstream_tag)
+		and die "Unexpected exit status from `git merge --no-ff -s recursive -X theirs --no-edit $upstream_tag\n";
+	
+	# Push the branch later
+	push(@refs_to_push, $branch_name);
+	
+	chomp(my $latest_version_in_changelog = `dpkg-parsechangelog -S Version`);
+	die "Unexpected exit status from `dpkg-parsechangelog -S Version`\n" unless($? == 0);
+	
+	if($latest_version_in_changelog ne $debian_version)
+	{
+		# Bump Debian changelog
+		
+		print ">> Updating changelog...\n";
+		
+		# Use dch to insert new version
+		system("dch", "-v", $debian_version, "-D", $distribution, "-u", "low", "")
+			and die "Unexpected exit status from `dch -v $debian_version -D $distribution -u low\n";
+		
+		# Read in changelog
+		open(my $changelog, "<", "debian/changelog") or die "debian/changelog: $!\n";
+		my @changelog_lines = <$changelog>;
+		close($changelog);
+		
+		# Replace second line with the full release details
+		$changelog_lines[2] = $changelog_text;
+		
+		# Rewrite changelog
+		open($changelog, ">", "debian/changelog") or die "debian/changelog: $!\n";
+		print {$changelog} $_ foreach(@changelog_lines);
+		close($changelog);
+		
+		# Commit new changelog
+		system("git", "add", "debian/changelog")
+			and die "Unexpected exit status from `git add debian/changelog\n";
+		system("git", "commit", "-m", "[debian] Release $version")
+			and die "Unexpected exit status from `git commit -m '[debian] Release $version'\n";
+	}
+	
+	if(!tag_exists($debian_tag, $branch_name))
+	{
+		print ">> Creating $debian_tag tag...\n";
+		
+		system("git", "tag", $debian_tag, $branch_name)
+			and die "Unexpected exit status from `git tag $debian_tag $branch_name\n";
+	}
+	
+	# Push the debian/<VERSION> tag later.
+	push(@refs_to_push, $debian_tag);
+}
+
+print "> Checking everything can be pushed...\n";
+print ">> @refs_to_push\n";
+
+# Do a dry run of all pushes to make sure there aren't any conflicts
+
+foreach my $ref(@refs_to_push)
+{
+	system("git", "push", "--dry-run", "origin", $ref)
+		and die "Unexpected exit status from `git push --dry-run origin $ref\n";
+}
+
+print "\n";
+print "Everything looks okay. Proceed with release? (y/N)\n";
+
+chomp(my $input = <STDIN>);
+
+unless($input eq "Y" || $input eq "y")
+{
+	print "Release not confirmed, aborting\n";
+	exit(0);
+}
+
+print "> Pushing changes...\n";
+print ">> @refs_to_push\n";
+
+foreach my $ref(@refs_to_push)
+{
+	system("git", "push", "origin", $ref)
+		and die "Unexpected exit status from `git push origin $ref\n";
+}
+
+chdir("/"); # cd out of $clone_root so it can be deleted.
+$clone_root->unlink_on_destroy(1);
+
+sub read_branches
+{
+	my ($filename) = @_;
+	
+	open(my $fh, "<", $filename) or die "$filename: $!\n";
+	my $json = do { local $/; <$fh> };
+	
+	my $data = eval { from_json($json) } // die "$filename: $@\n";
+	
+	return $data;
+}
+
+sub is_merged
+{
+	my ($dst_branch, $src_tag) = @_;
+	
+	my $status = system("git", "merge-base", "--is-ancestor", $src_tag, $dst_branch);
+	
+	if(WIFEXITED($status))
+	{
+		if(WEXITSTATUS($status) == 0)
+		{
+			return 1;
+		}
+		elsif(WEXITSTATUS($status) == 1)
+		{
+			return;
+		}
+	}
+	
+	die "Unexpected exit status from `git merge-base --is-ancestor $src_tag $dst_branch: $status";
+}
+
+# Returns true if the named tag exits (and points to $target, if defined)
+sub tag_exists
+{
+	my ($tag_name, $target) = @_;
+	
+	my $cmd = defined($target)
+		? "git tag --list --points-at $target"
+		: "git tag --list";
+	
+	my @tags = `$cmd`;
+	die "Unexpected exit status from `$cmd`: $?" unless($? == 0);
+	
+	chomp foreach(@tags);
+	
+	return !!(grep { $_ eq $tag_name } @tags);
+}
+
+# Read in a file and verify it matches the standards for the description area
+# of a debian changelog file.
+sub read_changelog_text
+{
+	my ($filename) = @_;
+	
+	open(my $fh, "<", $filename) or die "$filename: $!\n";
+	my $text = do { local $/; <$fh> };
+	
+	# Ensure a single trailing newline
+	$text =~ s/\n*$/\n/g;
+	
+	die "$filename doesn't appear to follow Debian changelog standards\n"
+		unless($text =~ m/^(  \* .{0,76}\n((    .{0,76})?\n)*)+$/);
+	
+	return $text;
+}

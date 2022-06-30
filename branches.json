@@ -1,0 +1,9 @@
+{
+	"debian/buster":    { "distribution": "buster",    "base-release": "0~debian10", "architectures": [ "i386", "amd64" ] },
+	"debian/bullseye":  { "distribution": "bullseye",  "base-release": "0~debian11", "architectures": [ "i386", "amd64" ] },
+	
+	"ubuntu/bionic":    { "distribution": "bionic",   "base-release": "0~ubuntu1804", "architectures": [ "i386", "amd64" ] },
+	"ubuntu/focal":     { "distribution": "focal",    "base-release": "0~ubuntu2004", "architectures": [ "amd64" ] },
+	"ubuntu/impish":    { "distribution": "impish",   "base-release": "0~ubuntu2110", "architectures": [ "amd64" ] },
+	"ubuntu/jammy":     { "distribution": "jammy",    "base-release": "0~ubuntu2204", "architectures": [ "amd64" ] }
+}
