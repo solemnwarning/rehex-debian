@@ -1,4 +1,4 @@
-rehex (0.5.3-0~ubuntu2204) jammy; urgency=low
+rehex (0.5.3-0~ubuntu2210) kinetic; urgency=low
 
   * Correctly nest comments when updating comments panel (#169).
 
@@ -25,7 +25,7 @@ rehex (0.5.3-0~ubuntu2204) jammy; urgency=low
 
   * Fix some undefined behaviour issues.
 
- -- Daniel Collins <solemnwarning@solemnwarning.net>  Sat, 25 Jun 2022 17:51:37 +0100
+ -- Daniel Collins <solemnwarning@solemnwarning.net>  Sun, 16 Oct 2022 00:22:23 +0100
 
 rehex (0.5.2-0~ubuntu2204) jammy; urgency=low
 
