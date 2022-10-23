@@ -1,3 +1,27 @@
+rehex (0.5.4-0~ubuntu2004) focal; urgency=low
+
+  * Allow passing arguments to structs created via ArrayResize() and
+    ArrayExtend() template functions.
+
+  * Fix parsing of whitespace in template array dereference (#175).
+
+  * Display offsets in comments panel (#165).
+
+  * Don't show expand arrows next to comments without children in comments
+    panel on Windows/macOS.
+
+  * Improve performance of templates that declare many (thousands+) of
+    variables in the file.
+
+  * Add Error() function for templates (#186).
+
+  * Fix crash when attempting to use string as a file variable in
+    templates (#185).
+
+  * [Pavel Martens] Add plugin for annotating pcap files.
+
+ -- Daniel Collins <solemnwarning@solemnwarning.net>  Sun, 23 Oct 2022 22:52:12 +0100
+
 rehex (0.5.3-0~ubuntu2004) focal; urgency=low
 
   * Correctly nest comments when updating comments panel (#169).
