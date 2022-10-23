@@ -1,5 +1,5 @@
 /* Reverse Engineer's Hex Editor
- * Copyright (C) 2019-2021 Daniel Collins <solemnwarning@solemnwarning.net>
+ * Copyright (C) 2019-2022 Daniel Collins <solemnwarning@solemnwarning.net>
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 as published by
@@ -20,6 +20,10 @@
 #include <utility>
 #include <wx/clipbrd.h>
 
+#ifdef __WXGTK__
+#include <gtk/gtk.h>
+#endif
+
 #include "CommentTree.hpp"
 #include "EditCommentDialog.hpp"
 #include "util.hpp"
@@ -38,6 +42,9 @@ enum {
 	ID_SELECT,
 };
 
+#define MODEL_OFFSET_COLUMN 0
+#define MODEL_TEXT_COLUMN 1
+
 BEGIN_EVENT_TABLE(REHex::CommentTree, wxPanel)
 	EVT_DATAVIEW_ITEM_CONTEXT_MENU(wxID_ANY, REHex::CommentTree::OnContextMenu)
 	EVT_DATAVIEW_ITEM_ACTIVATED(wxID_ANY, REHex::CommentTree::OnActivated)
@@ -46,19 +53,23 @@ END_EVENT_TABLE()
 REHex::CommentTree::CommentTree(wxWindow *parent, SharedDocumentPointer &document, DocumentCtrl *document_ctrl):
 	ToolPanel(parent),
 	document(document),
-	document_ctrl(document_ctrl)
+	document_ctrl(document_ctrl),
+	historic_max_comment_depth(0)
 {
-	model = new CommentTreeModel(this->document); /* Reference /class/ document pointer! */
+	model = new CommentTreeModel(this->document, document_ctrl); /* Reference /class/ document pointer! */
 	
-	dvc = new wxDataViewCtrl(this, wxID_ANY, wxDefaultPosition, wxDefaultSize, wxDV_NO_HEADER);
+	dvc = new wxDataViewCtrl(this, wxID_ANY, wxDefaultPosition, wxDefaultSize, 0);
 	
-	dvc_col = dvc->AppendTextColumn("Comment", 0);
-	dvc_col->SetSortable(true);
+	offset_col = dvc->AppendTextColumn("Offset", MODEL_OFFSET_COLUMN);
+	offset_col->SetSortable(true);
+	
+	text_col = dvc->AppendTextColumn("Comment", MODEL_TEXT_COLUMN);
+	text_col->SetSortable(false);
 	
 	dvc->AssociateModel(model);
 	
 	/* NOTE: This has to come after AssociateModel, or it will segfault. */
-	dvc_col->SetSortOrder(true);
+	offset_col->SetSortOrder(true);
 	
 	wxBoxSizer *sizer = new wxBoxSizer(wxVERTICAL);
 	sizer->Add(dvc, 1, wxEXPAND);
@@ -103,7 +114,56 @@ wxSize REHex::CommentTree::DoGetBestClientSize() const
 void REHex::CommentTree::refresh_comments()
 {
 	model->refresh_comments();
-	dvc_col->SetWidth(wxCOL_WIDTH_AUTOSIZE); /* Refreshes column width */
+	
+	#ifdef __WXGTK__
+	/* wxGTK doesn't account for the expander arrow when using wxCOL_WIDTH_AUTOSIZE, so we need
+	 * to calculate the width ourselves...
+	 *
+	 * We only resize the column when a new comment is added at a deeper level than any
+	 * previously existed at so as to not override if the user manually resizes the column.
+	*/
+	
+	int max_comment_depth = model->get_max_comment_depth();
+	if(max_comment_depth > historic_max_comment_depth)
+	{
+		historic_max_comment_depth = max_comment_depth;
+		
+		/* Get the width of the expander arrow in pixels. */
+		
+		GtkWidget *tree = dvc->GtkGetTreeView();
+		
+		int expander_size;
+		gtk_widget_style_get(tree, "expander-size", &expander_size, NULL);
+		// +1 to match GtkTreeView behavior
+		expander_size++;
+		
+		/* Get the width of the ADDITIONAL per-level indentation in pixels. */
+		
+		int extra_indent = dvc->GetIndent();
+		
+		/* Calculate the worst-case width for the actual offset text. */
+		
+		std::string offset_text = format_offset(0, document_ctrl->get_offset_display_base(), document->buffer_length());
+		
+		/* Change any alpha characters to 'X' - probably the widest in the font? */
+		for(auto it = offset_text.begin();
+			(it = std::find_if(it, offset_text.end(), [](char c) { return isalnum(c); })) != offset_text.end();
+			++it)
+		{
+			*it = 'X';
+		}
+		
+		wxSize offset_size = dvc->GetTextExtent(offset_text);
+		
+		offset_col->SetWidth(offset_size.GetWidth() + ((max_comment_depth + 1) * expander_size) + (max_comment_depth * extra_indent));
+	}
+	
+	#else
+	offset_col->SetWidth(wxCOL_WIDTH_AUTOSIZE); /* Refreshes column width */
+	#endif
+	
+	text_col->SetWidth(wxCOL_WIDTH_AUTOSIZE); /* Refreshes column width */
+	
 	dvc->Refresh();
 }
 
@@ -207,16 +267,13 @@ void REHex::CommentTree::OnActivated(wxDataViewEvent &event)
 	});
 }
 
-REHex::CommentTreeModel::CommentTreeModel(REHex::Document *document):
-	document(document) {}
+REHex::CommentTreeModel::CommentTreeModel(SharedDocumentPointer &document, DocumentCtrl *document_ctrl):
+	document(document),
+	document_ctrl(document_ctrl),
+	max_comment_depth(-1) {}
 
 void REHex::CommentTreeModel::refresh_comments()
 {
-	if(document == NULL)
-	{
-		return;
-	}
-	
 	const REHex::NestedOffsetLengthMap<REHex::Document::Comment> &comments = document->get_comments();
 	
 	/* Erase any comments which no longer exist, or are children of such. */
@@ -236,6 +293,8 @@ void REHex::CommentTreeModel::refresh_comments()
 	
 	/* Add any comments which we don't already have registered. */
 	
+	max_comment_depth = -1;
+	
 	/* Stack of comments the point we are processing is nested within. */
 	std::stack<values_elem_t*> parents;
 	
@@ -245,6 +304,11 @@ void REHex::CommentTreeModel::refresh_comments()
 		while(!parents.empty() && (parents.top()->first.offset + parents.top()->first.length) <= offset_base->first.offset)
 		{
 			parents.pop();
+		}
+		
+		if((int)(parents.size()) > max_comment_depth)
+		{
+			max_comment_depth = parents.size();
 		}
 		
 		/* We process any comments at the same offset from largest to smallest, ensuring
@@ -296,6 +360,12 @@ void REHex::CommentTreeModel::refresh_comments()
 					root.insert(value);
 				}
 				else{
+					if(!parent->second.is_container)
+					{
+						/* Parent just became a container. Have to re-add it. */
+						re_add_item(parent, true);
+					}
+					
 					parent->second.children.insert(value);
 				}
 				
@@ -314,6 +384,11 @@ void REHex::CommentTreeModel::refresh_comments()
 	}
 }
 
+int REHex::CommentTreeModel::get_max_comment_depth() const
+{
+	return max_comment_depth;
+}
+
 const REHex::NestedOffsetLengthMapKey *REHex::CommentTreeModel::dv_item_to_key(const wxDataViewItem &item)
 {
 	return (const NestedOffsetLengthMapKey*)(item.GetID());
@@ -330,24 +405,87 @@ std::map<REHex::NestedOffsetLengthMapKey, REHex::CommentTreeModel::CommentData>:
 		erase_value(values.find(child->first));
 	}
 	
+	bool parent_became_empty = false;
 	if(parent == NULL)
 	{
 		root.erase(value);
 	}
 	else{
 		parent->second.children.erase(value);
+		parent_became_empty = parent->second.children.empty();
 	}
 	
 	auto next_value_i = values.erase(value_i);
 	
 	ItemDeleted(wxDataViewItem(parent), wxDataViewItem(value));
 	
+	if(parent_became_empty)
+	{
+		/* Parent ceased to be a container. Have to re-add it. */
+		re_add_item(parent, false);
+	}
+	
 	return next_value_i;
+}
+
+void REHex::CommentTreeModel::re_add_item(values_elem_t *value, bool as_container)
+{
+	values_elem_t *parent = value->second.parent;
+	
+	/* Removing the last child of a container, even momentarily, will collapse that container
+	 * in the wxDataViewCtrl, so we insert a placeholder alongside the element we are removing
+	 * to stop the parent from collapsing and then remove it when we are done.
+	 *
+	 * Some code in this class expects all wxDataViewItem pointers to be elements within the
+	 * values map, but none of it should be hit within the ItemDeleted()/ItemAdded() calls...
+	*/
+	
+	std::shared_ptr<const wxString> placeholder_text(new wxString(""));
+	values_elem_t placeholder(NestedOffsetLengthMapKey(-1, 0), CommentData(parent, placeholder_text));
+	bool added_placeholder = false;
+	
+	if(parent != NULL && parent->second.children.size() == 1U)
+	{
+		parent->second.children.insert(&placeholder);
+		ItemAdded(wxDataViewItem(parent), wxDataViewItem(&placeholder));
+		added_placeholder = true;
+	}
+	
+	if(parent != NULL)
+	{
+		parent->second.children.erase(value);
+	}
+	else{
+		root.erase(value);
+	}
+	
+	ItemDeleted(wxDataViewItem(parent), wxDataViewItem(value));
+	
+	value->second.is_container = as_container;
+	
+	if(parent != NULL)
+	{
+		parent->second.children.insert(value);
+	}
+	else{
+		root.insert(value);
+	}
+	
+	ItemAdded(wxDataViewItem(parent), wxDataViewItem(value));
+	
+	if(added_placeholder)
+	{
+		parent->second.children.erase(&placeholder);
+		ItemDeleted(wxDataViewItem(parent), wxDataViewItem(&placeholder));
+	}
 }
 
 int REHex::CommentTreeModel::Compare(const wxDataViewItem &item1, const wxDataViewItem &item2, unsigned int column, bool ascending) const
 {
-	assert(column == 0);
+	assert(column == MODEL_OFFSET_COLUMN);
+	
+	assert(item1.IsOk());
+	assert(item2.IsOk());
 	
 	const NestedOffsetLengthMapKey *key1 = (const NestedOffsetLengthMapKey*)(item1.GetID());
 	const NestedOffsetLengthMapKey *key2 = (const NestedOffsetLengthMapKey*)(item2.GetID());
@@ -403,56 +541,72 @@ unsigned int REHex::CommentTreeModel::GetChildren(const wxDataViewItem &item, wx
 
 unsigned int REHex::CommentTreeModel::GetColumnCount() const
 {
-	return 1;
+	return 2;
 }
 
 wxString REHex::CommentTreeModel::GetColumnType(unsigned int col) const
 {
-	assert(col == 0);
+	assert(col == MODEL_OFFSET_COLUMN || col == MODEL_TEXT_COLUMN);
 	return "string";
 }
 
 wxDataViewItem REHex::CommentTreeModel::GetParent(const wxDataViewItem &item) const
 {
+	if(!item.IsOk())
+	{
+		return wxDataViewItem(NULL);
+	}
+	
 	values_elem_t *value = (values_elem_t*)(item.GetID());
 	return wxDataViewItem(value->second.parent);
 }
 
 void REHex::CommentTreeModel::GetValue(wxVariant &variant, const wxDataViewItem &item, unsigned int col) const
 {
-	assert(col == 0);
+	assert(col == MODEL_OFFSET_COLUMN || col == MODEL_TEXT_COLUMN);
 	
-	if(document == NULL)
+	if(!item.IsOk())
 	{
-		variant = "BUG: Document destroyed";
 		return;
 	}
 	
-	const NestedOffsetLengthMapKey *key = (const NestedOffsetLengthMapKey*)(item.GetID());
-	const REHex::NestedOffsetLengthMap<REHex::Document::Comment> &comments = document->get_comments();
+	values_elem_t *value = (values_elem_t*)(item.GetID());
 	
-	auto c = comments.find(*key);
-	if(c != comments.end())
+	if(col == MODEL_TEXT_COLUMN)
 	{
 		/* Only include up to the first line break in the comment text.
 		 * Note that wxString::find_first_of() returns the string length
 		 * if it doesn't find a match.
 		*/
-		size_t line_len = c->second.text->find_first_of("\r\n");
-		variant = c->second.text->substr(0, line_len);
+		
+		size_t line_len = value->second.text->find_first_of("\r\n");
+		variant = value->second.text->substr(0, line_len);
 	}
-	else{
-		variant = "BUG: Unknown key in REHex::CommentTreeModel::GetValue";
+	else /* if(col == MODEL_OFFSET_COLUMN) */
+	{
+		variant = format_offset(value->first.offset, document_ctrl->get_offset_display_base(), document->buffer_length());
 	}
 }
 
 bool REHex::CommentTreeModel::IsContainer(const wxDataViewItem &item) const
 {
-	return true;
+	if(!item.IsOk())
+	{
+		/* The root node is always a container. */
+		return true;
+	}
+	
+	values_elem_t *value = (values_elem_t*)(item.GetID());
+	return value->second.is_container;
 }
 
 bool REHex::CommentTreeModel::SetValue(const wxVariant &variant, const wxDataViewItem &item, unsigned int col)
 {
 	/* Base implementation is pure virtual, but I don't think we need this... */
 	abort();
+}
+
+bool REHex::CommentTreeModel::HasContainerColumns(const wxDataViewItem &item) const
+{
+	return true;
 }

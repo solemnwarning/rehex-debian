@@ -635,7 +635,7 @@ local function _builtin_function_FTell(context, argv)
 	return _builtin_types.int64_t, ImmediateValue:new(context.next_variable)
 end
 
-local function _builtin_function_Printf(context, argv)
+local function _render_format_string(context, argv)
 	local fmt = argv[1][2]:get()
 	
 	local format_params = { fmt }
@@ -706,7 +706,17 @@ local function _builtin_function_Printf(context, argv)
 		end
 	end
 	
-	context.interface.print(string.format(table.unpack(format_params)))
+	return string.format(table.unpack(format_params))
+end
+
+local function _builtin_function_Printf(context, argv)
+	local s = _render_format_string(context, argv)
+	context.interface.print(string.format(s))
+end
+
+local function _builtin_function_Error(context, argv)
+	local s = _render_format_string(context, argv)
+	_template_error(context, string.format(s))
 end
 
 local function _builtin_function_defn_ReadXXX(type_info, name)
@@ -742,7 +752,7 @@ local function _builtin_function_ArrayLength(context, argv)
 	return _builtin_types.int, ImmediateValue:new(#(argv[1][2]))
 end
 
-local function _resize_array(context, array_type, array_value, new_length)
+local function _resize_array(context, array_type, array_value, new_length, struct_arg_values)
 	local data_start, data_end = array_value:data_range()
 	if data_start ~= nil
 	then
@@ -778,7 +788,7 @@ local function _resize_array(context, array_type, array_value, new_length)
 			
 			for i = #array_value, new_length - 1
 			do
-				table.insert(array_value, expand_value(context, element_type, nil, true)) -- TODO: struct_args
+				table.insert(array_value, expand_value(context, element_type, struct_arg_values, true))
 				context.interface.yield()
 			end
 		end
@@ -793,10 +803,10 @@ local function _resize_array(context, array_type, array_value, new_length)
 end
 
 local function _builtin_function_ArrayResize(context, argv)
-	if #argv ~= 2 or argv[1][1] == nil or not argv[1][1].is_array or not _type_is_number(argv[2][1])
+	if #argv < 2 or argv[1][1] == nil or not argv[1][1].is_array or not _type_is_number(argv[2][1])
 	then
 		local got_types = table.concat(_map(argv, function(v) return _get_type_name(v[1]) end), ", ")
-		_template_error(context, "Attempt to call function ArrayResize(<any array type>, <number>) with incompatible argument types (" .. got_types .. ")")
+		_template_error(context, "Attempt to call function ArrayResize(<any array type>, <number>, ...) with incompatible argument types (" .. got_types .. ")")
 	end
 	
 	local array_type = argv[1][1]
@@ -804,19 +814,33 @@ local function _builtin_function_ArrayResize(context, argv)
 	
 	local new_length = argv[2][2]:get()
 	
+	local struct_arg_values = {}
+	if #argv > 2
+	then
+		if array_type.base ~= "struct"
+		then
+			_template_error(context, "Struct arguments passed to ArrayResize() for non-struct array element type '" .. _get_type_name(array_type) .. "'")
+		end
+		
+		for i = 3, #argv
+		do
+			table.insert(struct_arg_values, argv[i])
+		end
+	end
+	
 	if array_type.is_const
 	then
 		_template_error(context, "Attempt to modify 'const' array")
 	end
 	
-	_resize_array(context, array_type, array_value, new_length)
+	_resize_array(context, array_type, array_value, new_length, struct_arg_values)
 end
 
 local function _builtin_function_ArrayExtend(context, argv)
-	if #argv < 1 or #argv > 2 or argv[1][1] == nil or not argv[1][1].is_array or (#argv >= 2 and not _type_is_number(argv[2][1]))
+	if #argv < 1 or argv[1][1] == nil or not argv[1][1].is_array or (#argv >= 2 and not _type_is_number(argv[2][1]))
 	then
 		local got_types = table.concat(_map(argv, function(v) return _get_type_name(v[1]) end), ", ")
-		_template_error(context, "Attempt to call function ArrayExtend(<any array type>, <number>) with incompatible argument types (" .. got_types .. ")")
+		_template_error(context, "Attempt to call function ArrayExtend(<any array type>, <number>, ...) with incompatible argument types (" .. got_types .. ")")
 	end
 	
 	local array_type = argv[1][1]
@@ -825,12 +849,26 @@ local function _builtin_function_ArrayExtend(context, argv)
 	local rel_length = #argv >= 2 and argv[2][2]:get() or 1
 	local new_length = #array_value + rel_length
 	
+	local struct_arg_values = {}
+	if #argv > 2
+	then
+		if array_type.base ~= "struct"
+		then
+			_template_error(context, "Struct arguments passed to ArrayExtend() for non-struct array element type '" .. _get_type_name(array_type) .. "'")
+		end
+		
+		for i = 3, #argv
+		do
+			table.insert(struct_arg_values, argv[i])
+		end
+	end
+	
 	if array_type.is_const
 	then
 		_template_error(context, "Attempt to modify 'const' array")
 	end
 	
-	_resize_array(context, array_type, array_value, new_length)
+	_resize_array(context, array_type, array_value, new_length, struct_arg_values)
 end
 
 -- Table of builtin functions - gets copied into new interpreter contexts
@@ -866,6 +904,7 @@ local _builtin_functions = {
 	ReadFloat  = _builtin_function_defn_ReadXXX(_builtin_types.float,  "ReadFloat"),
 	
 	Printf = { arguments = { _builtin_types.string, _variadic_placeholder }, defaults = {}, impl = _builtin_function_Printf },
+	Error  = { arguments = { _builtin_types.string, _variadic_placeholder }, defaults = {}, impl = _builtin_function_Error  },
 	
 	ArrayLength = { arguments = { _variadic_placeholder }, defaults = {}, impl = _builtin_function_ArrayLength },
 	ArrayResize = { arguments = { _variadic_placeholder }, defaults = {}, impl = _builtin_function_ArrayResize },
@@ -1279,18 +1318,14 @@ _eval_unary_minus = function(context, statement)
 	return value_t, ImmediateValue:new(-1 * value_v:get())
 end
 
-expand_value = function(context, type_info, struct_args, is_array_element)
+expand_value = function(context, type_info, struct_arg_values, is_array_element)
 	if type_info.base == "struct"
 	then
-		local struct_arg_values = {}
 		local args_ok = true
 		
-		if struct_args ~= nil
+		if struct_arg_values == nil
 		then
-			for i = 1, #struct_args
-			do
-				struct_arg_values[i] = { _eval_statement(context, struct_args[i]) }
-			end
+			struct_arg_values = {}
 		end
 		
 		for i = 1, math.max(#struct_arg_values, #type_info.arguments)
@@ -1374,6 +1409,11 @@ expand_value = function(context, type_info, struct_args, is_array_element)
 				error("Internal error: Unexpected base type '" .. type_info.base .. "' at " .. filename .. ":" .. line_num)
 			end
 		else
+			if type_info.length == nil
+			then
+				_template_error(context, "Cannot use type '" .. _get_type_name(type_info) .. "' to declare a file variable")
+			end
+			
 			if (context.next_variable + type_info.length) > context.interface:file_length()
 			then
 				_template_error(context, "Hit end of file when declaring variable")
@@ -1388,7 +1428,7 @@ expand_value = function(context, type_info, struct_args, is_array_element)
 	end
 end
 
-local function _decl_variable(context, statement, var_type, var_name, struct_args, array_size, initial_value, is_local)
+local function _decl_variable(context, statement, var_type, var_name, struct_arg_values, array_size, initial_value, is_local)
 	local filename = statement[1]
 	local line_num = statement[2]
 	
@@ -1410,7 +1450,7 @@ local function _decl_variable(context, statement, var_type, var_name, struct_arg
 		end
 	end
 	
-	if struct_args ~= nil and type_info.base ~= "struct"
+	if struct_arg_values ~= nil and type_info.base ~= "struct"
 	then
 		_template_error(context, "Variable declaration with parameters for non-struct type '" .. _get_type_name(type_info) .. "'")
 	end
@@ -1494,7 +1534,7 @@ local function _decl_variable(context, statement, var_type, var_name, struct_arg
 	then
 		local base_off = context.next_variable
 		
-		root_value = expand_value(context, type_info, struct_args, false)
+		root_value = expand_value(context, type_info, struct_arg_values, false)
 		
 		for _,t in ipairs(dest_tables)
 		do
@@ -1541,7 +1581,7 @@ local function _decl_variable(context, statement, var_type, var_name, struct_arg
 			
 			for i = 0, ArrayLength_val:get() - 1
 			do
-				local value = expand_value(context, type_info, struct_args, true)
+				local value = expand_value(context, type_info, struct_arg_values, true)
 				table.insert(root_value, value)
 				
 				context.interface.yield()
@@ -1563,7 +1603,18 @@ _eval_variable = function(context, statement)
 	local struct_args = statement[6]
 	local array_size = statement[7]
 	
-	_decl_variable(context, statement, var_type, var_name, struct_args, array_size, nil, false)
+	local struct_arg_values = nil
+	if struct_args ~= nil
+	then
+		struct_arg_values = {}
+		
+		for i = 1, #struct_args
+		do
+			struct_arg_values[i] = { _eval_statement(context, struct_args[i]) }
+		end
+	end
+	
+	_decl_variable(context, statement, var_type, var_name, struct_arg_values, array_size, nil, false)
 end
 
 _eval_local_variable = function(context, statement)
@@ -1573,10 +1624,21 @@ _eval_local_variable = function(context, statement)
 	local array_size = statement[7]
 	local initial_value = statement[8]
 	
+	local struct_arg_values = nil
+	if struct_args ~= nil
+	then
+		struct_arg_values = {}
+		
+		for i = 1, #struct_args
+		do
+			struct_arg_values[i] = { _eval_statement(context, struct_args[i]) }
+		end
+	end
+	
 	local was_declaring_local_var = context.declaring_local_var
 	context.declaring_local_var = true
 	
-	_decl_variable(context, statement, var_type, var_name, struct_args, array_size, initial_value, true)
+	_decl_variable(context, statement, var_type, var_name, struct_arg_values, array_size, initial_value, true)
 	
 	context.declaring_local_var = was_declaring_local_var
 end
