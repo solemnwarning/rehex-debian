@@ -173,6 +173,8 @@ plugins/exe/plugin.lua
 plugins/exe/string_decode.lua
 plugins/exe/string_stream.lua
 plugins/exe/utils.lua
+plugins/pcap/Makefile
+plugins/pcap/plugin.lua
 res/Info.plist
 res/SOURCES.md
 res/actual_size16.png
@@ -305,6 +307,7 @@ src/disassemble.cpp
 src/disassemble.hpp
 src/document.cpp
 src/document.hpp
+src/endian_conv.hpp
 src/lua-bindings/FuncWrapper.hpp
 src/lua-bindings/rehex.i
 src/lua-bindings/rehex_override.hpp
@@ -351,6 +354,7 @@ tests/StringPanel.cpp
 tests/Tab.cpp
 tests/bin-data.bin
 tests/buffer.cpp
+tests/endian_conv.cpp
 tests/error-plugin.lua
 tests/ls.x86_64
 tests/main.cpp
