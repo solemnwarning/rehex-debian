@@ -110,7 +110,7 @@ endif
 LDLIBS := -lunistring $(WX_LIBS) $(GTK_LIBS) $(CAPSTONE_LIBS) $(JANSSON_LIBS) $(LUA_LIBS) $(LDLIBS)
 
 # Define this for releases
-VERSION := 0.5.3
+VERSION := 0.5.4
 
 ifdef VERSION
 	LONG_VERSION := Version $(VERSION)
@@ -126,8 +126,8 @@ else
 	
 	GIT_COMMIT_TIME ?= $(call shell-or-die,git log -1 --format="%ct")
 	
-	VERSION      := 42f8b1c8f3532351221b1d1e8d4dd4f60a28713a
-	LONG_VERSION := Snapshot 42f8b1c8f3532351221b1d1e8d4dd4f60a28713a
+	VERSION      := cd847ccb965b8b6de478aaf98433f5c46bd1d27f
+	LONG_VERSION := Snapshot cd847ccb965b8b6de478aaf98433f5c46bd1d27f
 endif
 
 DEPDIR := .d
@@ -394,6 +394,7 @@ TEST_OBJS := \
 	tests/DisassemblyRegion.o \
 	tests/Document.o \
 	tests/DocumentCtrl.o \
+	tests/endian_conv.o \
 	tests/FastRectangleFiller.o \
 	tests/IntelHexExport.o \
 	tests/IntelHexImport.o \
@@ -531,7 +532,8 @@ export libdir
 
 PLUGINS := \
 	binary-template \
-	exe
+	exe \
+	pcap
 
 .PHONY: install
 install: $(EXE) $(HELP_TARGET)
@@ -592,8 +594,8 @@ else
 	git ls-files | xargs cp --parents -t rehex-$(VERSION)/
 	
 	# Inline any references to the HEAD commit sha/timestamp
-	sed -i -e "s|\$42f8b1c8f3532351221b1d1e8d4dd4f60a28713a|42f8b1c8f3532351221b1d1e8d4dd4f60a28713a|g" rehex-$(VERSION)/Makefile
-	sed -i -e "s|\$1656156265|1656156265|g" rehex-$(VERSION)/Makefile
+	sed -i -e "s|\$cd847ccb965b8b6de478aaf98433f5c46bd1d27f|cd847ccb965b8b6de478aaf98433f5c46bd1d27f|g" rehex-$(VERSION)/Makefile
+	sed -i -e "s|\$1666561440|1666561440|g" rehex-$(VERSION)/Makefile
 endif
 	
 	# Generate reproducible tarball. All files use git commit timestamp.
@@ -601,7 +603,7 @@ endif
 		LC_ALL=C sort -z | \
 		tar \
 			--format=ustar \
-			--mtime=@1656156265 \
+			--mtime=@1666561440 \
 			--owner=0 --group=0 --numeric-owner \
 			--no-recursion --null  -T - \
 			-cf - | \
