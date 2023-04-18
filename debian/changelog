@@ -1,4 +1,4 @@
-rehex (0.5.4-0~ubuntu2210) lunar; urgency=low
+rehex (0.5.4-0~ubuntu2304) lunar; urgency=low
 
   * Allow passing arguments to structs created via ArrayResize() and
     ArrayExtend() template functions.
