@@ -20,7 +20,7 @@ rehex (0.5.4-0~ubuntu2304) lunar; urgency=low
 
   * [Pavel Martens] Add plugin for annotating pcap files.
 
- -- Daniel Collins <solemnwarning@solemnwarning.net>  Mon, 17 Apr 2023 219:53:09 +0100
+ -- Daniel Collins <solemnwarning@solemnwarning.net>  Mon, 17 Apr 2023 19:53:09 +0100
 
 rehex (0.5.3-0~ubuntu2210) kinetic; urgency=low
 
