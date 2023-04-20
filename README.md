@@ -10,6 +10,7 @@ Maintained releases:
 
 - debian/bullseye (Debian 11)
 - debian/buster (Debian 10)
+- ubuntu/lunar (Ubuntu 23.04)
 - ubuntu/kinetic (Ubuntu 22.10)
 - ubuntu/jammy (Ubuntu 22.04)
 - ubuntu/focal (Ubuntu 20.04)
@@ -24,11 +25,19 @@ Obsolete releases:
 - ubuntu/eoan (Ubuntu 19.10)
 - ubuntu/xenial (Ubuntu 16.04)
 
-## Building snapshots
+## Release process (the easy way)
 
-TODO
+Prepare a file (e.g. `changes.txt`) with the changes in the release, formatted in the usual style of a Debian changelog entry (not including header or author/date lines).
 
-## Release process
+Then run the script:
+
+```
+$ ./release-upstream-version 1.0.0 changes.txt [<branch>, ...]
+```
+
+The branch parameter is optional, all branches listed in `branches.json` will be updated by default.
+
+## Release process (the manual way)
 
 From a clean rehex-debian checkout:
 
@@ -52,10 +61,6 @@ $ git push origin debian/buster
 $ gbp tag --ignore-branch
 $ git push origin debian/0.3.92-0_debian10
 ```
-
-## Building releases
-
-TODO
 
 ## Package versioning
 
