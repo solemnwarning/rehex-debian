@@ -1,4 +1,4 @@
-rehex (0.5.4-0~debian12) UNRELEASED; urgency=low
+rehex (0.5.4-0~debian12) bookworm; urgency=low
 
   * Allow passing arguments to structs created via ArrayResize() and
     ArrayExtend() template functions.
@@ -20,7 +20,7 @@ rehex (0.5.4-0~debian12) UNRELEASED; urgency=low
 
   * [Pavel Martens] Add plugin for annotating pcap files.
 
- -- Daniel Collins <solemnwarning@solemnwarning.net>  Sun, 23 Oct 2022 22:52:11 +0100
+ -- Daniel Collins <solemnwarning@solemnwarning.net>  Sat, 24 Jun 2023 21:49:46 +0100
 
 rehex (0.5.3-0~debian11) bullseye; urgency=low
 
