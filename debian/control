@@ -9,13 +9,13 @@ Build-Depends:
  liblua5.3-dev,
  libtemplate-perl,
  libunistring-dev,
- libwxgtk3.0-gtk3-dev,
+ libwxgtk3.2-dev,
  lua-busted,
  lua5.3,
  pkg-config,
  xauth,
  xvfb,
- wx3.0-headers,
+ wx3.2-headers,
  zip,
  zlib1g-dev
 Standards-Version: 3.9.4
@@ -31,6 +31,6 @@ Depends:
  libjansson4,
  liblua5.3-0,
  libunistring2,
- libwxgtk3.0-gtk3-0v5,
+ libwxgtk3.2-1,
  zlib1g
 Description: Reverse Engineers' Hex Editor
