@@ -8,8 +8,8 @@ Each distro/release has a dedicated branch to allow for any necessary changes be
 
 Maintained releases:
 
+- debian/bookworm (Debian 12)
 - debian/bullseye (Debian 11)
-- debian/buster (Debian 10)
 - ubuntu/lunar (Ubuntu 23.04)
 - ubuntu/kinetic (Ubuntu 22.10)
 - ubuntu/jammy (Ubuntu 22.04)
@@ -17,6 +17,7 @@ Maintained releases:
 
 Obsolete releases:
 
+- debian/buster (Debian 10)
 - debian/stretch (Debian 9)
 - ubuntu/impish (Ubuntu 21.10)
 - ubuntu/hirsute (Ubuntu 21.04)
