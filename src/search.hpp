@@ -24,11 +24,13 @@
 #include <sys/types.h>
 #include <thread>
 #include <wx/checkbox.h>
+#include <wx/choice.h>
 #include <wx/progdlg.h>
 #include <wx/radiobut.h>
 #include <wx/textctrl.h>
 #include <wx/timer.h>
 
+#include "CharacterEncoder.hpp"
 #include "document.hpp"
 #include "NumericTextCtrl.hpp"
 #include "SharedDocumentPointer.hpp"
@@ -74,6 +76,10 @@ namespace REHex {
 			wxProgressDialog *progress;
 			wxTimer timer;
 			
+			bool auto_close;
+			bool auto_wrap;
+			wxWindow *modal_parent;
+			
 		protected:
 			Search(wxWindow *parent, SharedDocumentPointer &doc, const char *title);
 			
@@ -87,6 +93,10 @@ namespace REHex {
 		public:
 			void limit_range(off_t range_begin, off_t range_end);
 			void require_alignment(off_t alignment, off_t relative_to_offset = 0);
+			
+			void set_auto_close(bool auto_close);
+			void set_auto_wrap(bool auto_wrap);
+			void set_modal_parent(wxWindow *modal_parent);
 			
 			off_t find_next(off_t from_offset, size_t window_size = DEFAULT_WINDOW_SIZE);
 			void begin_search(off_t range_begin, off_t range_end, SearchDirection direction, size_t window_size = DEFAULT_WINDOW_SIZE);
@@ -116,16 +126,23 @@ namespace REHex {
 		private:
 			std::string search_for;
 			bool case_sensitive;
+			const CharacterEncoding *encoding;
+			bool cmp_fast_path;
+			
+			std::string initial_encoding; /* Only used during initialisation. */
 			
 			wxTextCtrl *search_for_tc;
 			wxCheckBox *case_sensitive_cb;
+			wxChoice *encoding_choice;
 			
 		public:
-			Text(wxWindow *parent, SharedDocumentPointer &doc, const std::string &search_for = "", bool case_sensitive = true);
+			Text(wxWindow *parent, SharedDocumentPointer &doc, const wxString &search_for = "", bool case_sensitive = true, const std::string &encoding = "ASCII");
 			virtual ~Text();
 			
 			virtual bool test(const void *data, size_t data_size);
 			virtual size_t test_max_window();
+			
+			bool set_search_string(const wxString &search_for);
 			
 		protected:
 			virtual void setup_window_controls(wxWindow *parent, wxSizer *sizer);

@@ -1,5 +1,5 @@
 /* Reverse Engineer's Hex Editor
- * Copyright (C) 2017-2022 Daniel Collins <solemnwarning@solemnwarning.net>
+ * Copyright (C) 2017-2023 Daniel Collins <solemnwarning@solemnwarning.net>
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 as published by
@@ -65,8 +65,10 @@ REHex::Document::Document():
 	types_changed_buffer(this, EV_TYPES_CHANGED),
 	mappings_changed_buffer(this, EV_MAPPINGS_CHANGED)
 {
-	buffer = new REHex::Buffer();
+	buffer = new Buffer();
 	title  = "Untitled";
+	
+	_forward_buffer_events();
 }
 
 REHex::Document::Document(const std::string &filename):
@@ -81,7 +83,7 @@ REHex::Document::Document(const std::string &filename):
 	types_changed_buffer(this, EV_TYPES_CHANGED),
 	mappings_changed_buffer(this, EV_MAPPINGS_CHANGED)
 {
-	buffer = new REHex::Buffer(filename);
+	buffer = new Buffer(filename);
 	
 	data_seq.set_range   (0, buffer->length(), 0);
 	types.set_range      (0, buffer->length(), "");
@@ -94,6 +96,27 @@ REHex::Document::Document(const std::string &filename):
 	{
 		_load_metadata(meta_filename);
 	}
+	
+	_forward_buffer_events();
+}
+
+void REHex::Document::_forward_buffer_events()
+{
+	buffer->Bind(BACKING_FILE_DELETED, [&](wxCommandEvent &event)
+	{
+		wxCommandEvent new_event(BACKING_FILE_DELETED);
+		new_event.SetEventObject(this);
+		
+		ProcessEvent(new_event);
+	});
+	
+	buffer->Bind(BACKING_FILE_MODIFIED, [&](wxCommandEvent &event)
+	{
+		wxCommandEvent new_event(BACKING_FILE_MODIFIED);
+		new_event.SetEventObject(this);
+		
+		ProcessEvent(new_event);
+	});
 }
 
 REHex::Document::~Document()
@@ -101,12 +124,128 @@ REHex::Document::~Document()
 	delete buffer;
 }
 
+void REHex::Document::reload()
+{
+	/* Ensure no transaction is in progress. */
+	assert(undo_stack.empty() || undo_stack.back().complete);
+	
+	if(filename.empty())
+	{
+		throw std::logic_error("Attempt to reload document with no backing file");
+	}
+	
+	/* There may be background tasks operating on this document, so we have to signal the
+	 * beginning of any operations that change the virtual view of the file to pause any
+	 * background processing overlapping it, do the operation and then signal that we are done.
+	 *
+	 * First, if the file has shrunk, we erase any data past the new EOF, then we swap out the
+	 * buffer as an overwrite operation, then finally we raise an insert operation without
+	 * actually changing the data if the file has grown.
+	*/
+	
+	Buffer *new_buffer = new Buffer(filename);
+	
+	wxGetApp().bulk_updates_freeze();
+	
+	off_t old_size = buffer_length();
+	off_t new_size = new_buffer->length();
+	
+	if(new_size < old_size)
+	{
+		off_t erase_begin = new_size;
+		off_t erase_length = old_size - new_size;
+		
+		/*
+		OffsetLengthEvent data_erasing_event(this, DATA_ERASING, erase_begin, erase_length);
+		ProcessEvent(data_erasing_event);
+		
+		buffer->erase_data(erase_begin, erase_length);
+		
+		OffsetLengthEvent data_erase_event(this, DATA_ERASE, erase_begin, erase_length);
+		ProcessEvent(data_erase_event);
+		*/
+		
+		_UNTRACKED_erase_data(erase_begin, erase_length);
+	}
+	
+	off_t overlap_size = std::min(old_size, new_size);
+	
+	OffsetLengthEvent data_overwriting_event(this, DATA_OVERWRITING, 0, overlap_size);
+	ProcessEvent(data_overwriting_event);
+	
+	delete buffer;
+	buffer = new_buffer;
+	
+	_forward_buffer_events();
+	
+	types.clear();
+	types.set_range(0, new_size, "");
+	
+	OffsetLengthEvent data_overwrite_event(this, DATA_OVERWRITE, 0, overlap_size);
+	ProcessEvent(data_overwrite_event);
+	
+	if(new_size > old_size)
+	{
+		OffsetLengthEvent data_inserting_event(this, DATA_INSERTING, old_size, new_size - old_size);
+		ProcessEvent(data_inserting_event);
+		
+		OffsetLengthEvent data_insert_event(this, DATA_INSERT, old_size, new_size - old_size);
+		ProcessEvent(data_insert_event);
+	}
+	
+	/* Clear all state and reload file metadata. */
+	
+	current_seq = 0;
+	buffer_seq = 0;
+	data_seq.clear();
+	data_seq.set_range(0, new_size, 0);
+	saved_seq = 0;
+	
+	undo_stack.clear();
+	redo_stack.clear();
+	
+	comments.clear();
+	highlights.clear();
+	
+	real_to_virt_segs.clear();
+	virt_to_real_segs.clear();
+	
+	size_t last_slash = filename.find_last_of("/\\");
+	title = (last_slash != std::string::npos ? filename.substr(last_slash + 1) : filename);
+	
+	std::string meta_filename = filename + ".rehex-meta";
+	if(wxFileExists(meta_filename))
+	{
+		_load_metadata(meta_filename);
+	}
+	
+	/* Fire off every metadata change signal. This will trigger an unnecessary amount of
+	 * processing, but there's no way to coalesce these together (yet).
+	*/
+	
+	_raise_comment_modified();
+	_raise_highlights_changed();
+	_raise_types_changed();
+	_raise_mappings_changed();
+	
+	wxGetApp().bulk_updates_thaw();
+	
+	_raise_undo_update();
+	_raise_clean();
+}
+
 void REHex::Document::save()
 {
-	buffer->write_inplace();
+	bool externally_changed = file_deleted() || file_modified();
+	
+	if(is_buffer_dirty() || externally_changed)
+	{
+		buffer->write_inplace();
+	}
+	
 	_save_metadata(filename + ".rehex-meta");
 	
-	if(current_seq != saved_seq)
+	if(current_seq != saved_seq || externally_changed)
 	{
 		saved_seq = current_seq;
 		buffer_seq = saved_seq;
@@ -118,6 +257,8 @@ void REHex::Document::save()
 
 void REHex::Document::save(const std::string &filename)
 {
+	bool externally_changed = file_deleted() || file_modified();
+	
 	buffer->write_inplace(filename);
 	this->filename = filename;
 	
@@ -126,7 +267,7 @@ void REHex::Document::save(const std::string &filename)
 	
 	_save_metadata(filename + ".rehex-meta");
 	
-	if(current_seq != saved_seq)
+	if(current_seq != saved_seq || externally_changed)
 	{
 		saved_seq = current_seq;
 		buffer_seq = saved_seq;
@@ -711,6 +852,16 @@ off_t REHex::Document::buffer_length() const
 	return buffer->length();
 }
 
+bool REHex::Document::file_deleted() const
+{
+	return buffer->file_deleted();
+}
+
+bool REHex::Document::file_modified() const
+{
+	return buffer->file_modified();
+}
+
 void REHex::Document::set_write_protect(bool write_protect)
 {
 	this->write_protect = write_protect;
@@ -721,7 +872,7 @@ bool REHex::Document::get_write_protect() const
 	return write_protect;
 }
 
-const REHex::NestedOffsetLengthMap<REHex::Document::Comment> &REHex::Document::get_comments() const
+const REHex::ByteRangeTree<REHex::Document::Comment> &REHex::Document::get_comments() const
 {
 	return comments;
 }
@@ -731,7 +882,7 @@ bool REHex::Document::set_comment(off_t offset, off_t length, const Comment &com
 	assert(offset >= 0);
 	assert(length >= 0);
 	
-	if(!NestedOffsetLengthMap_can_set(comments, offset, length))
+	if(!comments.can_set(offset, length))
 	{
 		return false;
 	}
@@ -739,7 +890,7 @@ bool REHex::Document::set_comment(off_t offset, off_t length, const Comment &com
 	_tracked_change("set comment",
 		[this, offset, length, comment]()
 		{
-			NestedOffsetLengthMap_set(comments, offset, length, comment);
+			comments.set(offset, length, comment);
 			_raise_comment_modified();
 		},
 		[this]()
@@ -753,7 +904,7 @@ bool REHex::Document::set_comment(off_t offset, off_t length, const Comment &com
 
 bool REHex::Document::erase_comment(off_t offset, off_t length)
 {
-	if(comments.find(NestedOffsetLengthMapKey(offset, length)) == comments.end())
+	if(comments.find(ByteRangeTreeKey(offset, length)) == comments.end())
 	{
 		return false;
 	}
@@ -761,7 +912,29 @@ bool REHex::Document::erase_comment(off_t offset, off_t length)
 	_tracked_change("delete comment",
 		[this, offset, length]()
 		{
-			comments.erase(NestedOffsetLengthMapKey(offset, length));
+			comments.erase(ByteRangeTreeKey(offset, length));
+			_raise_comment_modified();
+		},
+		[this]()
+		{
+			/* Comments are restored implicitly. */
+			_raise_comment_modified();
+		});
+	
+	return true;
+}
+
+bool REHex::Document::erase_comment_recursive(off_t offset, off_t length)
+{
+	if(comments.find(ByteRangeTreeKey(offset, length)) == comments.end())
+	{
+		return false;
+	}
+	
+	_tracked_change("delete comment and children",
+		[this, offset, length]()
+		{
+			comments.erase_recursive(ByteRangeTreeKey(offset, length));
 			_raise_comment_modified();
 		},
 		[this]()
@@ -788,7 +961,7 @@ bool REHex::Document::set_highlight(off_t off, off_t length, int highlight_colou
 		return false;
 	}
 	
-	if(!NestedOffsetLengthMap_can_set(highlights, off, length))
+	if(!highlights.can_set(off, length))
 	{
 		return false;
 	}
@@ -796,7 +969,7 @@ bool REHex::Document::set_highlight(off_t off, off_t length, int highlight_colou
 	_tracked_change("set highlight",
 		[this, off, length, highlight_colour_idx]()
 		{
-			NestedOffsetLengthMap_set(highlights, off, length, highlight_colour_idx);
+			highlights.set(off, length, highlight_colour_idx);
 			_raise_highlights_changed();
 		},
 		
@@ -1068,7 +1241,7 @@ off_t REHex::Document::virt_to_real_offset(off_t virt_offset) const
 	}
 }
 
-void REHex::Document::handle_paste(wxWindow *modal_dialog_parent, const NestedOffsetLengthMap<Document::Comment> &clipboard_comments)
+void REHex::Document::handle_paste(wxWindow *modal_dialog_parent, const ByteRangeTree<Document::Comment> &clipboard_comments)
 {
 	off_t cursor_pos = get_cursor_position();
 	off_t buffer_length = this->buffer_length();
@@ -1081,8 +1254,8 @@ void REHex::Document::handle_paste(wxWindow *modal_dialog_parent, const NestedOf
 			return;
 		}
 		
-		if(comments.find(NestedOffsetLengthMapKey(cursor_pos + cc->first.offset, cc->first.length)) != comments.end()
-			|| !NestedOffsetLengthMap_can_set(comments, cursor_pos + cc->first.offset, cc->first.length))
+		if(comments.find(ByteRangeTreeKey(cursor_pos + cc->first.offset, cc->first.length)) != comments.end()
+			|| !comments.can_set(cursor_pos + cc->first.offset, cc->first.length))
 		{
 			wxMessageBox("Cannot paste comment(s) - would overwrite one or more existing", "Error", (wxOK | wxICON_ERROR), modal_dialog_parent);
 			return;
@@ -1094,7 +1267,7 @@ void REHex::Document::handle_paste(wxWindow *modal_dialog_parent, const NestedOf
 		{
 			for(auto cc = clipboard_comments.begin(); cc != clipboard_comments.end(); ++cc)
 			{
-				NestedOffsetLengthMap_set(comments, cursor_pos + cc->first.offset, cc->first.length, cc->second);
+				comments.set(cursor_pos + cc->first.offset, cc->first.length, cc->second);
 			}
 			
 			_raise_comment_modified();
@@ -1377,12 +1550,12 @@ void REHex::Document::_UNTRACKED_insert_data(off_t offset, const unsigned char *
 		OffsetLengthEvent data_insert_event(this, DATA_INSERT, offset, length);
 		ProcessEvent(data_insert_event);
 		
-		if(NestedOffsetLengthMap_data_inserted(comments, offset, length) > 0)
+		if(comments.data_inserted(offset, length) > 0)
 		{
 			_raise_comment_modified();
 		}
 		
-		if(NestedOffsetLengthMap_data_inserted(highlights, offset, length) > 0)
+		if(highlights.data_inserted(offset, length) > 0)
 		{
 			_raise_highlights_changed();
 		}
@@ -1484,12 +1657,12 @@ void REHex::Document::_UNTRACKED_erase_data(off_t offset, off_t length)
 		OffsetLengthEvent data_erase_event(this, DATA_ERASE, offset, length);
 		ProcessEvent(data_erase_event);
 		
-		if(NestedOffsetLengthMap_data_erased(comments, offset, length) > 0)
+		if(comments.data_erased(offset, length) > 0)
 		{
 			_raise_comment_modified();
 		}
 		
-		if(NestedOffsetLengthMap_data_erased(highlights, offset, length) > 0)
+		if(highlights.data_erased(offset, length) > 0)
 		{
 			_raise_highlights_changed();
 		}
@@ -1718,9 +1891,9 @@ void REHex::Document::_save_metadata(const std::string &filename)
 	}
 }
 
-REHex::NestedOffsetLengthMap<REHex::Document::Comment> REHex::Document::_load_comments(const json_t *meta, off_t buffer_length)
+REHex::ByteRangeTree<REHex::Document::Comment> REHex::Document::_load_comments(const json_t *meta, off_t buffer_length)
 {
-	NestedOffsetLengthMap<Comment> comments;
+	ByteRangeTree<Comment> comments;
 	
 	json_t *j_comments = json_object_get(meta, "comments");
 	
@@ -1736,7 +1909,7 @@ REHex::NestedOffsetLengthMap<REHex::Document::Comment> REHex::Document::_load_co
 		if(offset >= 0 && offset < buffer_length
 			&& length >= 0 && (offset + length) <= buffer_length)
 		{
-			NestedOffsetLengthMap_set(comments, offset, length, Comment(text));
+			comments.set(offset, length, Comment(text));
 		}
 	}
 	
@@ -1762,7 +1935,7 @@ REHex::NestedOffsetLengthMap<int> REHex::Document::_load_highlights(const json_t
 			&& length > 0 && (offset + length) <= buffer_length
 			&& colour >= 0 && colour < Palette::NUM_HIGHLIGHT_COLOURS)
 		{
-			NestedOffsetLengthMap_set(highlights, offset, length, colour);
+			highlights.set(offset, length, colour);
 		}
 	}
 	
@@ -1950,15 +2123,15 @@ const wxDataFormat REHex::CommentsDataObject::format("rehex/comments/v1");
 REHex::CommentsDataObject::CommentsDataObject():
 	wxCustomDataObject(format) {}
 
-REHex::CommentsDataObject::CommentsDataObject(const std::list<NestedOffsetLengthMap<REHex::Document::Comment>::const_iterator> &comments, off_t base):
+REHex::CommentsDataObject::CommentsDataObject(const std::list<ByteRangeTree<Document::Comment>::const_iterator> &comments, off_t base):
 	wxCustomDataObject(format)
 {
 	set_comments(comments, base);
 }
 
-REHex::NestedOffsetLengthMap<REHex::Document::Comment> REHex::CommentsDataObject::get_comments() const
+REHex::ByteRangeTree<REHex::Document::Comment> REHex::CommentsDataObject::get_comments() const
 {
-	REHex::NestedOffsetLengthMap<REHex::Document::Comment> comments;
+	ByteRangeTree<Document::Comment> comments;
 	
 	const unsigned char *data = (const unsigned char*)(GetData());
 	const unsigned char *end = data + GetSize();
@@ -1968,7 +2141,7 @@ REHex::NestedOffsetLengthMap<REHex::Document::Comment> REHex::CommentsDataObject
 	{
 		wxString text(wxString::FromUTF8((const char*)(header + 1), header->text_length));
 		
-		bool x = NestedOffsetLengthMap_set(comments, header->file_offset, header->file_length, REHex::Document::Comment(text));
+		bool x = comments.set(header->file_offset, header->file_length, REHex::Document::Comment(text));
 		assert(x); /* TODO: Raise some kind of error. Beep? */
 		
 		data += sizeof(Header) + header->text_length;
@@ -1977,13 +2150,13 @@ REHex::NestedOffsetLengthMap<REHex::Document::Comment> REHex::CommentsDataObject
 	return comments;
 }
 
-void REHex::CommentsDataObject::set_comments(const std::list<NestedOffsetLengthMap<REHex::Document::Comment>::const_iterator> &comments, off_t base)
+void REHex::CommentsDataObject::set_comments(const std::list<ByteRangeTree<Document::Comment>::const_iterator> &comments, off_t base)
 {
 	size_t size = 0;
 	
 	for(auto i = comments.begin(); i != comments.end(); ++i)
 	{
-		size += sizeof(Header) + (*i)->second.text->utf8_str().length();
+		size += sizeof(Header) + (*i)->value.text->utf8_str().length();
 	}
 	
 	void *data = Alloc(size); /* Wrapper around new[] - throws on failure */
@@ -1995,10 +2168,10 @@ void REHex::CommentsDataObject::set_comments(const std::list<NestedOffsetLengthM
 		Header *header = (Header*)(outp);
 		outp += sizeof(Header);
 		
-		const wxScopedCharBuffer utf8_text = (*i)->second.text->utf8_str();
+		const wxScopedCharBuffer utf8_text = (*i)->value.text->utf8_str();
 		
-		header->file_offset = (*i)->first.offset - base;
-		header->file_length = (*i)->first.length;
+		header->file_offset = (*i)->key.offset - base;
+		header->file_length = (*i)->key.length;
 		header->text_length = utf8_text.length();
 		
 		memcpy(outp, utf8_text.data(), utf8_text.length());

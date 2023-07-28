@@ -1,5 +1,5 @@
 -- Binary Template plugin for REHex
--- Copyright (C) 2021-2022 Daniel Collins <solemnwarning@solemnwarning.net>
+-- Copyright (C) 2021-2023 Daniel Collins <solemnwarning@solemnwarning.net>
 --
 -- This program is free software; you can redistribute it and/or modify it
 -- under the terms of the GNU General Public License version 2 as published by
@@ -14,12 +14,16 @@
 -- this program; if not, write to the Free Software Foundation, Inc., 51
 -- Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 
-local ArrayValue     = require 'executor.arrayvalue'
-local FileArrayValue = require 'executor.filearrayvalue'
-local FileValue      = require 'executor.filevalue'
-local ImmediateValue = require 'executor.immediatevalue'
-local PlainValue     = require 'executor.plainvalue'
-local StructValue    = require 'executor.structvalue'
+local ArrayIndexValue = require 'executor.arrayindexvalue'
+local ArrayValue      = require 'executor.arrayvalue'
+local FileArrayValue  = require 'executor.filearrayvalue'
+local FileValue       = require 'executor.filevalue'
+local ImmediateValue  = require 'executor.immediatevalue'
+local PlainValue      = require 'executor.plainvalue'
+local StructValue     = require 'executor.structvalue'
+local TypeMapper      = require 'executor.typemapper'
+local util            = require 'executor.util'
+local VarAllocator    = require 'executor.varallocator'
 
 local M = {}
 
@@ -150,41 +154,8 @@ end
 -- _eval_call() function handles this specific object specially.
 local _variadic_placeholder = {}
 
-local function _make_overlay_type(base_type, child_type)
-	local new_type = {};
-	
-	for k,v in pairs(base_type)
-	do
-		new_type[k] = v
-	end
-	
-	for k,v in pairs(child_type)
-	do
-		new_type[k] = v
-	end
-	
-	return new_type
-end
-
-local function _make_named_type(name, type_info)
-	return _make_overlay_type(type_info, { name = name })
-end
-
-local function _make_aray_type(type_info)
-	return _make_overlay_type(type_info, { is_array = true })
-end
-
-local function _make_nonarray_type(type_info)
-	return _make_overlay_type(type_info, { is_array = false })
-end
-
-local function _make_ref_type(type_info)
-	return _make_overlay_type(type_info, { is_ref = true })
-end
-
-local function _make_const_type(type_info)
-	return _make_overlay_type(type_info, { is_const = true })
-end
+local _allocated_variable_placeholder = {}
+local _initialised_variable_placeholder = {}
 
 local function _get_type_name(type)
 	if type == _variadic_placeholder
@@ -209,7 +180,7 @@ local function _get_type_name(type)
 			type_name = "<anonymous struct>"
 		end
 	else
-		error("Internal error: unknown type in _get_type_name()")
+		error("Internal error: unknown type in _get_type_name()" .. "\n" .. debug.traceback())
 	end
 	
 	if type.is_const
@@ -221,7 +192,8 @@ local function _get_type_name(type)
 	then
 		if type.array_size ~= nil
 		then
-			type_name = type_name .. "[" .. type.array_size .. "]"
+			assert(#type.array_size >= 1)
+			type_name = type_name .. "[" .. type.array_size[#type.array_size] .. "]"
 		else
 			type_name = type_name .. "[]"
 		end
@@ -233,32 +205,6 @@ local function _get_type_name(type)
 	end
 	
 	return type_name
-end
-
-local function _make_signed_type(context, type_info)
-	if type_info.signed_overlay ~= nil
-	then
-		local new_type = _make_overlay_type(type_info, type_info.signed_overlay)
-		
-		new_type.name = "signed " .. new_type.name:gsub("^signed ", ""):gsub("^unsigned ", "")
-		
-		return new_type
-	else
-		_template_error(context, "Attempt to create invalid 'signed' version of type '" .. _get_type_name(type_info) .. "'")
-	end
-end
-
-local function _make_unsigned_type(context, type_info)
-	if type_info.unsigned_overlay ~= nil
-	then
-		local new_type = _make_overlay_type(type_info, type_info.unsigned_overlay)
-		
-		new_type.name = "unsigned " .. new_type.name:gsub("^signed ", ""):gsub("^unsigned ", "")
-		
-		return new_type
-	else
-		_template_error(context, "Attempt to create invalid 'unsigned' version of type '" .. _get_type_name(type_info) .. "'")
-	end
 end
 
 local function _type_is_string(type_info)
@@ -407,7 +353,7 @@ local function _assign_value(context, dst_type, dst_val, src_type, src_val)
 			
 			if dst_type.int_mask ~= nil
 			then
-				v = v & dst_type.int_mask
+				v = math.floor(v) & dst_type.int_mask
 			end
 			
 			dst_val:set(v)
@@ -464,8 +410,8 @@ local function _make_value_from_value(context, dst_type, src_type, src_val, move
 	
 	if src_type.is_array
 	then
-		local dst_elem_type = _make_nonarray_type(dst_type)
-		local src_elem_type = _make_nonarray_type(src_type)
+		local dst_elem_type = util.make_nonarray_type(dst_type)
+		local src_elem_type = util.make_nonarray_type(src_type)
 		
 		local dst_val = ArrayValue:new()
 		
@@ -497,7 +443,7 @@ local function _make_value_from_value(context, dst_type, src_type, src_val, move
 	
 	if dst_type.int_mask ~= nil and (src_type.int_mask == nil or src_type.int_mask ~= dst_type.int_mask)
 	then
-		return PlainValue:new(src_val:get() & dst_type.int_mask)
+		return PlainValue:new(math.floor(src_val:get()) & dst_type.int_mask)
 	end
 	
 	if move_if_possible
@@ -554,33 +500,35 @@ _builtin_type_uint64 .signed_overlay   = _builtin_type_int64
 _builtin_type_uint64 .unsigned_overlay = _builtin_type_uint64
 
 _builtin_types = {
-	char   = _make_named_type("char",   _builtin_type_int8),
-	int8_t = _make_named_type("int8_t", _builtin_type_int8),
+	char   = util.make_named_type("char",   _builtin_type_int8),
+	int8_t = util.make_named_type("int8_t", _builtin_type_int8),
 	
-	uint8_t = _make_named_type("uint8_t", _builtin_type_uint8),
+	uint8_t = util.make_named_type("uint8_t", _builtin_type_uint8),
 	
-	int16_t  = _make_named_type("int16_t",  _builtin_type_int16),
-	uint16_t = _make_named_type("uint16_t", _builtin_type_uint16),
+	int16_t  = util.make_named_type("int16_t",  _builtin_type_int16),
+	uint16_t = util.make_named_type("uint16_t", _builtin_type_uint16),
 	
-	int     = _make_named_type("int",     _builtin_type_int32),
-	int32_t = _make_named_type("int32_t", _builtin_type_int32),
+	int     = util.make_named_type("int",     _builtin_type_int32),
+	int32_t = util.make_named_type("int32_t", _builtin_type_int32),
 	
-	uint32_t = _make_named_type("uint32_t", _builtin_type_uint32),
+	uint32_t = util.make_named_type("uint32_t", _builtin_type_uint32),
 	
-	int64_t = _make_named_type("int64_t", _builtin_type_int64),
+	int64_t = util.make_named_type("int64_t", _builtin_type_int64),
 	
-	uint64_t = _make_named_type("uint64_t", _builtin_type_uint64),
+	uint64_t = util.make_named_type("uint64_t", _builtin_type_uint64),
 	
-	float = _make_named_type("float", _builtin_type_float32),
+	float = util.make_named_type("float", _builtin_type_float32),
 	
-	double = _make_named_type("double", _builtin_type_float64),
+	double = util.make_named_type("double", _builtin_type_float64),
 	
 	string = { name = "string", base = "string" },
 }
 
 local _builtin_variables = {
-	["true"]  = { _builtin_types.int, ImmediateValue:new(1) },
-	["false"] = { _builtin_types.int, ImmediateValue:new(0) },
+	["true"]  = function(context) return { _builtin_types.int, ImmediateValue:new(1) } end,
+	["false"] = function(context) return { _builtin_types.int, ImmediateValue:new(0) } end,
+	
+	["ArrayIndex"] = function(context) return { _builtin_types.int64_t, ArrayIndexValue:new(context) } end,
 }
 
 local function _builtin_function_BigEndian(context, argv)
@@ -711,7 +659,12 @@ end
 
 local function _builtin_function_Printf(context, argv)
 	local s = _render_format_string(context, argv)
-	context.interface.print(string.format(s))
+	context.interface.print(s)
+end
+
+local function _builtin_function_SPrintf(context, argv)
+	local s = _render_format_string(context, argv)
+	return _builtin_types.string, ImmediateValue:new(s)
 end
 
 local function _builtin_function_Error(context, argv)
@@ -740,6 +693,41 @@ local function _builtin_function_defn_ReadXXX(type_info, name)
 		},
 		impl = impl,
 	}
+end
+
+local function _builtin_function_ReadString(context, argv)
+	local pos = argv[1][2]:get()
+	local term_char = argv[2][2]:get()
+	local max_len = argv[3][2]:get()
+	
+	local str = ""
+	local str_length = 0
+	
+	while true
+	do
+		if max_len >= 0 and str_length == max_len
+		then
+			return _builtin_types.string, ImmediateValue:new(str:sub(1, str_length))
+		end
+		
+		if str_length == str:len()
+		then
+			local str_more = context.interface.read_data(pos + str_length, 128)
+			if str_more:len() < 1
+			then
+				_template_error(context, "Attempt to read past end of file in ReadString function")
+			end
+			
+			str = str .. str_more
+		end
+		
+		if str:byte(str_length + 1) == term_char
+		then
+			return _builtin_types.string, ImmediateValue:new(str:sub(1, str_length))
+		end
+		
+		str_length = str_length + 1
+	end
 end
 
 local function _builtin_function_ArrayLength(context, argv)
@@ -784,11 +772,11 @@ local function _resize_array(context, array_type, array_value, new_length, struc
 		
 		if #array_value < new_length
 		then
-			local element_type = _make_nonarray_type(array_type)
+			local element_type = util.make_nonarray_type(array_type)
 			
 			for i = #array_value, new_length - 1
 			do
-				table.insert(array_value, expand_value(context, element_type, struct_arg_values, true))
+				table.insert(array_value, expand_value(context, element_type, struct_arg_values, i))
 				context.interface.yield()
 			end
 		end
@@ -871,6 +859,80 @@ local function _builtin_function_ArrayExtend(context, argv)
 	_resize_array(context, array_type, array_value, new_length, struct_arg_values)
 end
 
+local function _builtin_function_ArrayPush(context, argv)
+	if #argv ~= 2 or argv[1][1] == nil or not argv[1][1].is_array
+	then
+		local got_types = table.concat(_map(argv, function(v) return _get_type_name(v[1]) end), ", ")
+		_template_error(context, "Attempt to call function ArrayPush(<any array type>, <array value type>) with incompatible argument types (" .. got_types .. ")")
+	end
+	
+	if not _type_assignable(util.make_nonarray_type(argv[1][1]), argv[2][1])
+	then
+		local got_types = table.concat(_map(argv, function(v) return _get_type_name(v[1]) end), ", ")
+		_template_error(context, "Attempt to push incompatible value type '" .. _get_type_name(argv[2][1]) .. "' into array type '"  .. _get_type_name(argv[1][1]) .. "'")
+	end
+	
+	local array_type = argv[1][1]
+	local array_value = argv[1][2]
+	
+	local data_start, data_end = array_value:data_range()
+	if data_start ~= nil
+	then
+		_template_error(context, "Attempt to modify non-local array")
+	end
+	
+	local new_value = _make_value_from_value(context, util.make_nonarray_type(array_type), argv[2][1], argv[2][2], false)
+	table.insert(array_value, new_value);
+end
+
+local function _builtin_function_ArrayPop(context, argv)
+	if #argv ~= 1 or argv[1][1] == nil or not argv[1][1].is_array
+	then
+		local got_types = table.concat(_map(argv, function(v) return _get_type_name(v[1]) end), ", ")
+		_template_error(context, "Attempt to call function ArrayPop(<any array type>) with incompatible argument types (" .. got_types .. ")")
+	end
+	
+	local array_type = argv[1][1]
+	local array_value = argv[1][2]
+	
+	local data_start, data_end = array_value:data_range()
+	if data_start ~= nil
+	then
+		_template_error(context, "Attempt to modify non-local array")
+	end
+	
+	if #array_value == 0
+	then
+		_template_error(context, "Attempt to pop value from empty array")
+	end
+	
+	return util.make_nonarray_type(array_type), table.remove(array_value)
+end
+
+local function _builtin_function_OffsetOf(context, argv)
+	if #argv ~= 1 or argv[1][1] == nil
+	then
+		local got_types = table.concat(_map(argv, function(v) return _get_type_name(v[1]) end), ", ")
+		_template_error(context, "Attempt to call function OffsetOf(<any type>) with incompatible argument types (" .. got_types .. ")")
+	end
+	
+	local data_start, data_end = argv[1][2]:data_range()
+	if data_start == nil
+	then
+		_template_error(context, "Attempt to get file offset of a local variable")
+	end
+	
+	return _builtin_types.int64_t, ImmediateValue:new(data_start)
+end
+
+local function _builtin_function_StringLengthBytes(context, argv)
+	return _builtin_types.int64_t, ImmediateValue:new(argv[1][2]:get():len())
+end
+
+local function _builtin_function_SetComment(context, argv)
+	context.interface.set_comment(argv[1][2]:get(), argv[2][2]:get(), argv[3][2]:get())
+end
+
 -- Table of builtin functions - gets copied into new interpreter contexts
 --
 -- Each key is a function name, the value is a table with the following values:
@@ -903,85 +965,43 @@ local _builtin_functions = {
 	ReadDouble = _builtin_function_defn_ReadXXX(_builtin_types.double, "ReadDouble"),
 	ReadFloat  = _builtin_function_defn_ReadXXX(_builtin_types.float,  "ReadFloat"),
 	
-	Printf = { arguments = { _builtin_types.string, _variadic_placeholder }, defaults = {}, impl = _builtin_function_Printf },
-	Error  = { arguments = { _builtin_types.string, _variadic_placeholder }, defaults = {}, impl = _builtin_function_Error  },
+	ReadString = {
+		arguments = {
+			_builtin_types.int64_t,
+			_builtin_types.uint8_t,
+			_builtin_types.int64_t,
+		},
+		
+		defaults  = {
+			-- FTell()
+			{ debug.getinfo(1,'S').source, debug.getinfo(1, 'l').currentline, "call", "FTell", {} },
+			
+			-- '\0'
+			{ debug.getinfo(1,'S').source, debug.getinfo(1, 'l').currentline, "num", 0 },
+			
+			-- -1
+			{ debug.getinfo(1,'S').source, debug.getinfo(1, 'l').currentline, "num", -1 },
+		},
+		
+		impl = _builtin_function_ReadString,
+	},
+	
+	Printf  = { arguments = { _builtin_types.string, _variadic_placeholder }, defaults = {}, impl = _builtin_function_Printf },
+	SPrintf = { arguments = { _builtin_types.string, _variadic_placeholder }, defaults = {}, impl = _builtin_function_SPrintf },
+	Error   = { arguments = { _builtin_types.string, _variadic_placeholder }, defaults = {}, impl = _builtin_function_Error  },
 	
 	ArrayLength = { arguments = { _variadic_placeholder }, defaults = {}, impl = _builtin_function_ArrayLength },
 	ArrayResize = { arguments = { _variadic_placeholder }, defaults = {}, impl = _builtin_function_ArrayResize },
 	ArrayExtend = { arguments = { _variadic_placeholder }, defaults = {}, impl = _builtin_function_ArrayExtend },
+	ArrayPush   = { arguments = { _variadic_placeholder }, defaults = {}, impl = _builtin_function_ArrayPush },
+	ArrayPop    = { arguments = { _variadic_placeholder }, defaults = {}, impl = _builtin_function_ArrayPop },
+	
+	OffsetOf = { arguments = { _variadic_placeholder }, defaults = {}, impl = _builtin_function_OffsetOf },
+	
+	StringLengthBytes = { arguments = { _builtin_types.string }, defaults = {}, impl = _builtin_function_StringLengthBytes },
+	
+	SetComment = { arguments = { _builtin_types.int64_t, _builtin_types.int64_t, _builtin_types.string }, defaults = {}, impl = _builtin_function_SetComment },
 }
-
-_find_type = function(context, type_name)
-	local convert = nil
-	
-	type_name = " " .. type_name .. " "
-	
-	local make_unsigned = false
-	local make_signed = false
-	local make_ref = false
-	local make_const = false
-	local make_array = false
-	
-	if type_name:find(" unsigned ") ~= nil
-	then
-		make_unsigned = true
-		type_name = type_name:gsub(" unsigned ", " ", 1)
-	elseif type_name:find(" signed ") ~= nil
-	then
-		make_signed = true
-		type_name = type_name:gsub(" signed ", " ", 1)
-	end
-	
-	if type_name:find(" & ") ~= nil
-	then
-		make_ref = true
-		type_name = type_name:gsub(" & ", " ", 1)
-	end
-	
-	if type_name:find(" const ") ~= nil
-	then
-		make_const = true
-		type_name = type_name:gsub(" const ", " ", 1)
-	end
-	
-	if type_name:find(" %[%] ") ~= nil
-	then
-		make_array = true
-		type_name = type_name:gsub(" %[%] ", " ", 1)
-	end
-	
-	type_name = type_name:sub(2, -2)
-	
-	local type_info = nil
-	
-	for i = #context.stack, 1, -1
-	do
-		for k, v in pairs(context.stack[i].var_types)
-		do
-			if k == type_name
-			then
-				type_info = v
-				break
-			end
-		end
-		
-		if type_info
-		then
-			break
-		end
-	end
-	
-	if type_info ~= nil
-	then
-		if make_unsigned then type_info = _make_unsigned_type(context, type_info) end
-		if make_signed   then type_info = _make_signed_type(context, type_info)   end
-		if make_ref      then type_info = _make_ref_type(type_info)      end
-		if make_const    then type_info = _make_const_type(type_info)    end
-		if make_array    then type_info = _make_aray_type(type_info)     end
-	end
-	
-	return type_info
-end
 
 --
 -- The _eval_XXX functions are what actually take the individual statements
@@ -995,11 +1015,11 @@ end
 ---
 
 _eval_number = function(context, statement)
-	return _make_const_type(_builtin_types.int), ImmediateValue:new(statement[4])
+	return util.make_const_type(_builtin_types.int), ImmediateValue:new(statement[4])
 end
 
 _eval_string = function(context, statement)
-	return _make_const_type(_builtin_types.string), ImmediateValue:new(statement[4])
+	return util.make_const_type(_builtin_types.string), ImmediateValue:new(statement[4])
 end
 
 -- Resolves a variable reference to an actual value.
@@ -1036,7 +1056,7 @@ _eval_ref = function(context, statement)
 					then
 						_template_error(context, "Attempt to access out-of-range array index " .. array_idx)
 					else
-						rv_type = _make_nonarray_type(rv_type)
+						rv_type = util.make_nonarray_type(rv_type)
 						rv_val = rv_val[array_idx_v:get() + 1]
 					end
 				else
@@ -1066,36 +1086,19 @@ _eval_ref = function(context, statement)
 		
 		if force_const
 		then
-			rv_type = _make_const_type(rv_type)
+			rv_type = util.make_const_type(rv_type)
 		end
 		
 		return rv_type, rv_val
 	end
 	
-	-- Walk through symbol tables looking for the first element in path
-	
-	for frame_idx = #context.stack, 1, -1
-	do
-		local frame = context.stack[frame_idx]
-		
-		if frame.vars[ path[1] ] ~= nil
-		then
-			return _walk_path(frame.vars[ path[1] ])
-		end
-		
-		if frame.frame_type == FRAME_TYPE_FUNCTION or frame.frame_type == FRAME_TYPE_STRUCT
-		then
-			-- Don't look for variables in parent functions
-			break
-		end
-	end
-	
-	if context.global_vars[ path[1] ] ~= nil
+	local var_slot = statement.var_slot
+	if var_slot <= 0
 	then
-		return _walk_path(context.global_vars[ path[1] ])
+		var_slot = context.func_var_base - var_slot
 	end
 	
-	_template_error(context, "Attempt to use undefined variable '" .. path[1] .. "'")
+	return _walk_path(context.var_stack[var_slot])
 end
 
 _eval_add = function(context, statement)
@@ -1318,7 +1321,7 @@ _eval_unary_minus = function(context, statement)
 	return value_t, ImmediateValue:new(-1 * value_v:get())
 end
 
-expand_value = function(context, type_info, struct_arg_values, is_array_element)
+expand_value = function(context, type_info, struct_arg_values, array_element_idx)
 	if type_info.base == "struct"
 	then
 		local args_ok = true
@@ -1378,21 +1381,40 @@ expand_value = function(context, type_info, struct_arg_values, is_array_element)
 		
 		local frame = {
 			frame_type = FRAME_TYPE_STRUCT,
-			var_types = {},
-			vars = {},
 			struct_members = members,
+			array_element_idx = array_element_idx,
 			
 			blocks_flowctrl_types = (FLOWCTRL_TYPE_RETURN | FLOWCTRL_TYPE_BREAK | FLOWCTRL_TYPE_CONTINUE),
 		}
 		
-		for idx, arg in ipairs(type_info.arguments)
+		table.insert(context.stack, frame)
+		
+		local old_func_var_base = context.func_var_base
+		context.func_var_base = #context.var_stack + 1
+		
+		for i = 1, type_info.allocate_slots
 		do
-			local arg_name = arg[1]
-			frame.vars[arg_name] = struct_arg_values[idx]
+			table.insert(context.var_stack, _initialised_variable_placeholder)
 		end
 		
-		table.insert(context.stack, frame)
+		for idx, arg in ipairs(type_info.arguments)
+		do
+			local arg_slot = type_info.arguments[idx].var_slot
+			assert(arg_slot <= 0)
+			
+			assert(context.var_stack[context.func_var_base - arg_slot] == _initialised_variable_placeholder)
+			context.var_stack[context.func_var_base - arg_slot] = struct_arg_values[idx]
+		end
+		
 		_exec_statements(context, type_info.code)
+		
+		for i = 1, type_info.allocate_slots
+		do
+			table.remove(context.var_stack)
+		end
+		
+		context.func_var_base = old_func_var_base
+		
 		table.remove(context.stack)
 		
 		return members
@@ -1428,7 +1450,7 @@ expand_value = function(context, type_info, struct_arg_values, is_array_element)
 	end
 end
 
-local function _decl_variable(context, statement, var_type, var_name, struct_arg_values, array_size, initial_value, is_local)
+local function _decl_variable(context, statement, var_type, var_name, struct_arg_values, array_size, attributes, initial_value, is_local, is_private)
 	local filename = statement[1]
 	local line_num = statement[2]
 	
@@ -1438,60 +1460,57 @@ local function _decl_variable(context, statement, var_type, var_name, struct_arg
 		iv_type, iv_value = _eval_statement(context, initial_value)
 	end
 	
-	local type_info
-	if type(var_type) == "table"
-	then
-		type_info = var_type
-	else
-		type_info = _find_type(context, var_type)
-		if type_info == nil
-		then
-			_template_error(context, "Unknown variable type '" .. var_type .. "'")
-		end
-	end
+	assert(type(var_type) == "table")
+	local type_info = var_type
 	
 	if struct_arg_values ~= nil and type_info.base ~= "struct"
 	then
 		_template_error(context, "Variable declaration with parameters for non-struct type '" .. _get_type_name(type_info) .. "'")
 	end
 	
-	if type_info.array_size ~= nil
-	then
-		if array_size ~= nil
-		then
-			_template_error(context, "Multidimensional arrays are not supported")
-		end
-		
-		-- Filthy filthy filthy...
-		array_size = { debug.getinfo(1,'S').source, debug.getinfo(1, 'l').currentline, "num", type_info.array_size }
-	end
-	
 	local dest_tables
 	
-	if not is_local and _can_do_flowctrl_here(context, FLOWCTRL_TYPE_RETURN)
+	if not (is_local or is_private) and _can_do_flowctrl_here(context, FLOWCTRL_TYPE_RETURN)
 	then
 		_template_error(context, "Attempt to declare non-local variable inside function")
 	end
 	
 	local struct_frame = _topmost_frame_of_type(context, FRAME_TYPE_STRUCT)
-	if struct_frame ~= nil and not is_local
+	if is_local or is_private
 	then
-		dest_tables = { struct_frame.vars, struct_frame.struct_members }
+		dest_tables = {}
 		
-		if struct_frame.vars[var_name] ~= nil
+	elseif struct_frame ~= nil and not is_local and not is_private
+	then
+		dest_tables = { struct_frame.struct_members }
+		
+		if struct_frame.struct_members[var_name] ~= nil
 		then
 			_template_error(context, "Attempt to redefine struct member '" .. var_name .. "'")
 		end
-	elseif is_local
-	then
-		dest_tables = { context.stack[#context.stack].vars }
+		
 	else
 		dest_tables = { context.global_vars }
 	end
 	
-	if dest_tables[1][var_name] ~= nil
+	local var_slot = statement.var_slot
+	if var_slot == nil
 	then
-		_template_error(context, "Attempt to redefine variable '" .. var_name .. "'")
+		local inspect = require 'inspect'
+		error(inspect(statement))
+	end
+	
+	assert(var_slot ~= nil)
+	
+	if var_slot <= 0
+	then
+		assert(context.func_var_base ~= nil)
+		var_slot = context.func_var_base - var_slot
+	end
+	
+	if context.var_stack[var_slot] ~= _initialised_variable_placeholder
+	then
+		_template_error(context, "Attempt to redefine variable '" .. var_name .. "' (previously defined at " .. context.var_stack[var_slot].def_filename .. ":" .. context.var_stack[var_slot].def_line .. ")")
 	end
 	
 	if type_info.is_ref
@@ -1518,14 +1537,83 @@ local function _decl_variable(context, statement, var_type, var_name, struct_arg
 			t[var_name] = { type_info, iv_value }
 		end
 		
+		context.var_stack[var_slot] = { type_info, iv_value, def_filename = statement[1], def_line = statement[2] }
+		
 		return
 	end
 	
 	if context.big_endian
 	then
-		type_info = _make_overlay_type(type_info, { big_endian = true,  rehex_type = type_info.rehex_type_be })
+		type_info = util.make_big_endian_type(type_info)
 	else
-		type_info = _make_overlay_type(type_info, { big_endian = false, rehex_type = type_info.rehex_type_le })
+		type_info = util.make_little_endian_type(type_info)
+	end
+	
+	local array_type_info = type_info
+	
+	if type_info.array_size ~= nil
+	then
+		assert(#type_info.array_size >= 1)
+		
+		if array_size ~= nil
+		then
+			_template_error(context, "Multidimensional arrays are not supported")
+		end
+		
+		-- Filthy filthy filthy...
+		array_size = { debug.getinfo(1,'S').source, debug.getinfo(1, 'l').currentline, "num", type_info.array_size[#type_info.array_size] }
+	elseif array_size ~= nil
+	then
+		array_type_info = util.make_array_type(type_info)
+	end
+	
+	-- Variable attributes (so far) are only used for defining encoding on character arrays, so
+	-- we check for that attribute in this lovely kludge here.
+	
+	local string_charset
+	
+	if attributes ~= nil
+	then
+		for i = 1, #attributes
+		do
+			local attr_name = attributes[i][1]
+			local attr_value_type = attributes[i][2] and attributes[i][2][1]
+			local attr_value = attributes[i][2] and attributes[i][2][2]
+			
+			if attr_name == "charset" and _type_is_char_array(array_type_info)
+			then
+				if string_charset ~= nil
+				then
+					_template_error(context, "Attribute 'charset' specified multiple times")
+				end
+				
+				if not _type_is_stringish(attr_value_type)
+				then
+					_template_error(context, "Unexpected type '" .. _get_type_name(attr_value_type) .. "' used as value for 'charset' attribute (expected string)")
+				end
+				
+				local charset_name = _stringify_value(attr_value_type, attr_value)
+				local charset_valid = false
+				
+				for j = 1, #context.valid_charsets
+				do
+					if context.valid_charsets[j] == charset_name
+					then
+						charset_valid = true
+						break
+					end
+				end
+				
+				if not charset_valid
+				then
+					_template_error(context, "Unrecognised character set '" .. charset_name .. "' specified")
+				end
+				
+				string_charset = charset_name
+			else
+				_template_error(context, "Invalid variable attribute '" .. attr_name .. "' used with type '" .. _get_type_name(array_type_info) .. "'")
+			end
+		end
 	end
 	
 	local root_value
@@ -1534,7 +1622,7 @@ local function _decl_variable(context, statement, var_type, var_name, struct_arg
 	then
 		local base_off = context.next_variable
 		
-		root_value = expand_value(context, type_info, struct_arg_values, false)
+		root_value = expand_value(context, type_info, struct_arg_values, nil)
 		
 		for _,t in ipairs(dest_tables)
 		do
@@ -1547,12 +1635,11 @@ local function _decl_variable(context, statement, var_type, var_name, struct_arg
 			_template_error(context, "Expected numeric type for array size, got '" .. _get_type_name(ArrayLength_type) .. "'")
 		end
 		
-		local array_type_info = _make_aray_type(type_info)
-		
 		if type_info.base ~= "struct" and not context.declaring_local_var
 		then
 			local data_type_fmt = (context.big_endian and ">" or "<") .. type_info.string_fmt
 			root_value = FileArrayValue:new(context, context.next_variable, ArrayLength_val:get(), type_info.length, data_type_fmt)
+			root_value.charset = string_charset
 			
 			context.next_variable = context.next_variable + (ArrayLength_val:get() * type_info.length)
 			
@@ -1581,7 +1668,7 @@ local function _decl_variable(context, statement, var_type, var_name, struct_arg
 			
 			for i = 0, ArrayLength_val:get() - 1
 			do
-				local value = expand_value(context, type_info, struct_arg_values, true)
+				local value = expand_value(context, type_info, struct_arg_values, i)
 				table.insert(root_value, value)
 				
 				context.interface.yield()
@@ -1595,6 +1682,8 @@ local function _decl_variable(context, statement, var_type, var_name, struct_arg
 	then
 		_assign_value(context, type_info, root_value, iv_type, iv_value)
 	end
+	
+	context.var_stack[var_slot] = { array_type_info, root_value, def_filename = statement[1], def_line = statement[2] }
 end
 
 _eval_variable = function(context, statement)
@@ -1602,6 +1691,7 @@ _eval_variable = function(context, statement)
 	local var_name = statement[5]
 	local struct_args = statement[6]
 	local array_size = statement[7]
+	local attributes = statement[8]
 	
 	local struct_arg_values = nil
 	if struct_args ~= nil
@@ -1614,7 +1704,35 @@ _eval_variable = function(context, statement)
 		end
 	end
 	
-	_decl_variable(context, statement, var_type, var_name, struct_arg_values, array_size, nil, false)
+	local attributes_evaluated = nil
+	if attributes ~= nil
+	then
+		attributes_evaluated = {}
+		
+		for i = 1, #attributes
+		do
+			local attr_name = attributes[i][3]
+			local attr_value = attributes[i][4]
+			
+			if attr_value ~= nil
+			then
+				attr_value = { _eval_statement(context, attr_value) }
+			end
+			
+			attributes_evaluated[i] = { attr_name, attr_value }
+		end
+	end
+	
+	local was_declaring_local_var = context.declaring_local_var
+	
+	if statement.private
+	then
+		context.declaring_local_var = false
+	end
+	
+	_decl_variable(context, statement, statement.type_info, var_name, struct_arg_values, array_size, attributes_evaluated, nil, false, statement.private)
+	
+	context.declaring_local_var = was_declaring_local_var
 end
 
 _eval_local_variable = function(context, statement)
@@ -1638,7 +1756,7 @@ _eval_local_variable = function(context, statement)
 	local was_declaring_local_var = context.declaring_local_var
 	context.declaring_local_var = true
 	
-	_decl_variable(context, statement, var_type, var_name, struct_arg_values, array_size, initial_value, true)
+	_decl_variable(context, statement, statement.type_info, var_name, struct_arg_values, array_size, nil, initial_value, true)
 	
 	context.declaring_local_var = was_declaring_local_var
 end
@@ -1791,35 +1909,17 @@ _eval_func_defn = function(context, statement)
 		_template_error(context, "Attempt to redefine function '" .. func_name .. "'")
 	end
 	
-	local ret_type
-	if func_ret_type ~= "void"
-	then
-		ret_type = _find_type(context, func_ret_type)
-		if ret_type == nil
-		then
-			_template_error(context, "Attempt to define function '" .. func_name .. "' with undefined return type '" .. func_ret_type .. "'")
-		end
-	end
+	local ret_type = statement.return_type_info
 	
 	local arg_types = {}
 	for i = 1, #func_args
 	do
-		local arg_type_name = func_args[i][1]
-		
-		local type_info = _find_type(context, arg_type_name)
-		if type_info == nil
-		then
-			_template_error(context, "Attempt to define function '" .. func_name .. "' with undefined argument type '" .. arg_type_name .. "'")
-		end
-		
-		table.insert(arg_types, type_info)
+		table.insert(arg_types, func_args[i].type_info)
 	end
 	
 	local impl_func = function(context, arguments)
 		local frame = {
 			frame_type = FRAME_TYPE_FUNCTION,
-			var_types = {},
-			vars = {},
 			
 			handles_flowctrl_types = FLOWCTRL_TYPE_RETURN,
 			blocks_flowctrl_types  = (FLOWCTRL_TYPE_BREAK | FLOWCTRL_TYPE_CONTINUE),
@@ -1832,20 +1932,33 @@ _eval_func_defn = function(context, statement)
 			error("Internal error: wrong number of function arguments")
 		end
 		
+		table.insert(context.stack, frame)
+		
+		local old_func_var_base = context.func_var_base
+		context.func_var_base = #context.var_stack + 1
+		
+		for i = 1, statement.allocate_slots
+		do
+			table.insert(context.var_stack, _initialised_variable_placeholder)
+		end
+		
 		for i = 1, #arguments
 		do
 			local arg_type = arg_types[i]
 			local arg_name = func_args[i][2]
+			local arg_slot = func_args[i].var_slot
 			
 			if not _type_assignable(arg_type, arguments[i][1])
 			then
 				error("Internal error: incompatible function arguments")
 			end
 			
-			frame.vars[arg_name] = arguments[i]
+			assert(arg_slot <= 0)
+			arg_slot = context.func_var_base - arg_slot
+			
+			assert(context.var_stack[arg_slot] == _initialised_variable_placeholder)
+			context.var_stack[arg_slot] = arguments[i]
 		end
-		
-		table.insert(context.stack, frame)
 		
 		local retval
 		
@@ -1864,6 +1977,13 @@ _eval_func_defn = function(context, statement)
 				end
 			end
 		end
+		
+		for i = 1, statement.allocate_slots
+		do
+			table.remove(context.var_stack)
+		end
+		
+		context.func_var_base = old_func_var_base
 		
 		table.remove(context.stack)
 		
@@ -1892,62 +2012,13 @@ _eval_struct_defn = function(context, statement)
 	local typedef_name      = statement[7]
 	local var_decl          = statement[8]
 	
-	local struct_typename = struct_name ~= nil and "struct " .. struct_name or nil
-	
-	if struct_typename ~= nil and _find_type(context, struct_typename) ~= nil
-	then
-		_template_error(context, "Attempt to redefine type '" .. struct_typename .. "'")
-	end
-	
-	if typedef_name ~= nil and _find_type(context, typedef_name) ~= nil
-	then
-		_template_error(context, "Attempt to redefine type '" .. typedef_name .. "'")
-	end
-	
-	local args = {}
-	for i = 1, #struct_args
-	do
-		local type_info = _find_type(context, struct_args[i][1])
-		if type_info == nil
-		then
-			_template_error(context, "Attempt to define 'struct " .. struct_name .. "' with undefined argument type '" .. struct_args[i][1] .. "'")
-		end
-		
-		table.insert(args, { struct_args[i][2], type_info })
-	end
-	
-	local type_info = {
-		base      = "struct",
-		arguments = args,
-		code      = struct_statements,
-		
-		struct_name = struct_name,
-		type_key  = {}, -- Uniquely-identifiable table reference used to check if struct
-		                  -- types are derived from the same root (and thus compatible)
-		
-		-- rehex_type_le = "s8",
-		-- rehex_type_be = "s8",
-		-- length = 1,
-		-- string_fmt = "i1"
-	}
-	
-	if struct_typename ~= nil
-	then
-		context.stack[#context.stack].var_types[struct_typename] = _make_named_type(struct_typename, type_info)
-	end
-	
-	if typedef_name ~= nil
-	then
-		context.stack[#context.stack].var_types[typedef_name] = _make_named_type(typedef_name, type_info)
-	end
-	
 	if var_decl ~= nil
 	then
 		local var_name   = var_decl[1]
 		local var_args   = var_decl[2]
 		local array_size = var_decl[3]
 		
-		_decl_variable(context, statement, type_info, var_name, var_args, array_size, nil, false)
+		_decl_variable(context, statement, statement.type_info, var_name, var_args, array_size, nil, nil, false)
 	end
 end
 
@@ -1956,35 +2027,20 @@ _eval_typedef = function(context, statement)
 	local typedef_name = statement[5]
 	local array_size   = statement[6]
 	
-	local type_info = _find_type(context, type_name)
-	if type_info == nil
-	then
-		_template_error(context, "Use of undefined type '" .. type_name .. "'")
-	end
+	assert(statement.type_info ~= nil)
 	
-	if _find_type(context, typedef_name) ~= nil
-	then
-		_template_error(context, "Attempt to redefine type '" .. typedef_name .. "'")
-	end
+	local type_info = statement.type_info
 	
 	if array_size ~= nil
 	then
-		if type_info.array_size ~= nil
-		then
-			_template_error(context, "Multidimensional arrays are not supported")
-		end
-		
 		local ArrayLength_type, ArrayLength_val = _eval_statement(context, array_size)
 		if ArrayLength_type == nil or ArrayLength_type.base ~= "number"
 		then
 			_template_error(context, "Expected numeric type for array size, got '" .. _get_type_name(ArrayLength_type) .. "'")
 		end
 		
-		type_info = _make_aray_type(type_info)
-		type_info.array_size = ArrayLength_val:get()
+		table.insert(type_info.array_size, ArrayLength_val:get())
 	end
-	
-	context.stack[#context.stack].var_types[typedef_name] = _make_named_type(typedef_name, type_info)
 end
 
 _eval_enum = function(context, statement)
@@ -1994,39 +2050,16 @@ _eval_enum = function(context, statement)
 	local typedef_name = statement[7]
 	local var_decl     = statement[8]
 	
-	local enum_typename = enum_name ~= nil and "enum " .. enum_name or nil
-	
-	-- Check type names are valid
-	
-	local type_info = _find_type(context, type_name)
-	if type_info == nil
-	then
-		_template_error(context, "Use of undefined type '" .. type_name .. "'")
-	end
-	
-	if enum_typename ~= nil and _find_type(context, enum_typename) ~= nil
-	then
-		_template_error(context, "Attempt to redefine type '" .. enum_typename .. "'")
-	end
-	
-	if typedef_name ~= nil and _find_type(context, typedef_name) ~= nil
-	then
-		_template_error(context, "Attempt to redefine type '" .. typedef_name .. "'")
-	end
+	local type_info = statement.type_info
 	
 	-- Define each member as a const variable of the base type in the current scope.
 	
 	local next_member_val = 0
-	local scope_vars = context.stack[#context.stack].vars
 	
 	for _, member_pair in pairs(members)
 	do
 		local member_name, member_expr = table.unpack(member_pair)
-		
-		if scope_vars[member_name] ~= nil
-		then
-			_template_error(context, "Attempt to redefine name '" .. member_name .. "'")
-		end
+		local member_slot = member_pair.var_slot
 		
 		if member_expr ~= nil
 		then
@@ -2040,29 +2073,25 @@ _eval_enum = function(context, statement)
 			next_member_val = member_v:get()
 		end
 		
-		scope_vars[member_name] = { type_info, ImmediateValue:new(next_member_val) }
+		if member_slot <= 0
+		then
+			member_slot = context.func_var_base - member_slot
+		end
+		
+		assert(context.var_stack[member_slot] == _initialised_variable_placeholder)
+		context.var_stack[member_slot] = { type_info, ImmediateValue:new(next_member_val) }
+		
 		next_member_val = next_member_val + 1
 	end
 	
 	-- Define the enum type as a copy of its base type
-	
-	if enum_typename ~= nil
-	then
-		type_info = _make_named_type(enum_typename, type_info)
-		context.stack[#context.stack].var_types[enum_typename] = type_info
-	end
-	
-	if typedef_name ~= nil
-	then
-		context.stack[#context.stack].var_types[typedef_name] = _make_named_type(typedef_name, type_info)
-	end
 	
 	if var_decl ~= nil
 	then
 		local var_name   = var_decl[1]
 		local array_size = var_decl[3]
 		
-		_decl_variable(context, statement, type_info, var_name, nil, array_size, nil, false)
+		_decl_variable(context, statement, type_info, var_name, nil, array_size, nil, nil, false)
 	end
 end
 
@@ -2083,8 +2112,6 @@ _eval_if = function(context, statement)
 		then
 			local frame = {
 				frame_type = FRAME_TYPE_SCOPE,
-				var_types = {},
-				vars = {},
 			}
 			
 			table.insert(context.stack, frame)
@@ -2107,17 +2134,32 @@ _eval_if = function(context, statement)
 	end
 end
 
+local function _clear_borrow_slots(context, borrow_slots_base, borrow_slots_num)
+	local borrow_slot_base = borrow_slots_base <= 0
+		and context.func_var_base - borrow_slots_base
+		or borrow_slots_base
+	
+	for i = 0, borrow_slots_num - 1
+	do
+		local borrow_slot = borrow_slot_base + i
+		context.var_stack[borrow_slot] = _initialised_variable_placeholder
+	end
+end
+
 _eval_for = function(context, statement)
 	local init_expr = statement[4]
 	local cond_expr = statement[5]
 	local iter_expr = statement[6]
 	local body      = statement[7]
 	
+	local outer_borrow_slots_base = statement.outer_borrow_slots_base
+	local outer_borrow_slots_num = statement.outer_borrow_slots_num
+	
+	local inner_borrow_slots_base = statement.inner_borrow_slots_base
+	local inner_borrow_slots_num = statement.inner_borrow_slots_num
+	
 	local frame = {
 		frame_type = FRAME_TYPE_SCOPE,
-		var_types = {},
-		vars = {},
-		
 		handles_flowctrl_types = (FLOWCTRL_TYPE_BREAK | FLOWCTRL_TYPE_CONTINUE),
 	}
 	
@@ -2152,8 +2194,6 @@ _eval_for = function(context, statement)
 		
 		local frame = {
 			frame_type = FRAME_TYPE_SCOPE,
-			var_types = {},
-			vars = {},
 		}
 		
 		table.insert(context.stack, frame)
@@ -2166,6 +2206,9 @@ _eval_for = function(context, statement)
 			then
 				if sr_t.flowctrl == FLOWCTRL_TYPE_BREAK
 				then
+					_clear_borrow_slots(context, inner_borrow_slots_base, inner_borrow_slots_num)
+					_clear_borrow_slots(context, outer_borrow_slots_base, outer_borrow_slots_num)
+					
 					table.remove(context.stack)
 					table.remove(context.stack)
 					return
@@ -2173,6 +2216,9 @@ _eval_for = function(context, statement)
 				then
 					break
 				else
+					_clear_borrow_slots(context, inner_borrow_slots_base, inner_borrow_slots_num)
+					_clear_borrow_slots(context, outer_borrow_slots_base, outer_borrow_slots_num)
+					
 					table.remove(context.stack)
 					table.remove(context.stack)
 					return sr_t, sr_v
@@ -2182,11 +2228,15 @@ _eval_for = function(context, statement)
 		
 		table.remove(context.stack)
 		
+		_clear_borrow_slots(context, inner_borrow_slots_base, inner_borrow_slots_num)
+		
 		if iter_expr
 		then
 			_eval_statement(context, iter_expr)
 		end
 	end
+	
+	_clear_borrow_slots(context, outer_borrow_slots_base, outer_borrow_slots_num)
 	
 	table.remove(context.stack)
 end
@@ -2203,6 +2253,7 @@ _eval_switch = function(context, statement)
 	end
 	
 	local found_match = false
+	local case_match = {}
 	
 	for _, case in ipairs(cases)
 	do
@@ -2220,33 +2271,32 @@ _eval_switch = function(context, statement)
 			
 			if expr_v:get() == case_expr_v:get()
 			then
-				case[1] = true
+				table.insert(case_match, true)
 				found_match = true
 			else
-				case[1] = false
+				table.insert(case_match, false)
 			end
+		else
+			table.insert(case_match, false)
 		end
 	end
 	
 	if not found_match
 	then
-		for _, case in ipairs(cases)
+		for idx, case in ipairs(cases)
 		do
 			local case_expr = case[1]
 			local case_body = case[2]
 			
 			if case_expr == nil
 			then
-				case[1] = true
+				case_match[idx] = true
 			end
 		end
 	end
 	
 	local frame = {
 		frame_type = FRAME_TYPE_SCOPE,
-		var_types = {},
-		vars = {},
-		
 		handles_flowctrl_types = FLOWCTRL_TYPE_BREAK,
 	}
 	
@@ -2254,12 +2304,11 @@ _eval_switch = function(context, statement)
 	
 	found_match = false
 	
-	for _, case in ipairs(cases)
+	for idx, case in ipairs(cases)
 	do
-		local case_matched = case[1]
 		local case_body = case[2]
 		
-		if not found_match and case_matched
+		if not found_match and case_match[idx]
 		then
 			found_match = true
 		end
@@ -2291,10 +2340,11 @@ end
 _eval_block = function(context, statement)
 	local body = statement[4]
 	
+	local borrow_slots_base = statement.borrow_slots_base
+	local borrow_slots_num = statement.borrow_slots_num
+	
 	local frame = {
 		frame_type = FRAME_TYPE_SCOPE,
-		var_types = {},
-		vars = {},
 	}
 	
 	table.insert(context.stack, frame)
@@ -2305,10 +2355,14 @@ _eval_block = function(context, statement)
 		
 		if sr_t and sr_t.flowctrl ~= nil
 		then
+			_clear_borrow_slots(context, borrow_slots_base, borrow_slots_num)
+			
 			table.remove(context.stack)
 			return sr_t, sr_v
 		end
 	end
+	
+	_clear_borrow_slots(context, borrow_slots_base, borrow_slots_num)
 	
 	table.remove(context.stack)
 end
@@ -2335,11 +2389,7 @@ _eval_cast = function(context, statement)
 	local type_name = statement[4]
 	local value_expr = statement[5]
 	
-	local type_info = _find_type(context, type_name)
-	if type_info == nil
-	then
-		_template_error(context, "Unknown type '" .. type_name .. "' used in cast")
-	end
+	local type_info = statement.type_info
 	
 	local value_t, value_v = _eval_statement(context, value_expr)
 	if not _type_assignable(type_info, value_t)
@@ -2462,6 +2512,138 @@ _ops = {
 	["minus"] = _eval_unary_minus,
 }
 
+local function _resolve_types(statements)
+	local block_stack = { _builtin_types, {} }
+	
+	local find_type = function(type_name)
+		for i = #block_stack, 1, -1
+		do
+			if block_stack[i][type_name] ~= nil
+			then
+				return block_stack[i][type_name]
+			end
+		end
+	end
+	
+	local process_statement
+	local process_optional_statement
+	local process_statements
+	local process_block
+	
+	process_statement = function(statement)
+		local op = statement[3]
+		
+		if op == "function"
+		then
+			local func_statements = statement[7]
+			process_block(func_statements)
+			
+		elseif op == "struct"
+		then
+			local struct_statements = statement[6]
+			local var_decl          = statement[8]
+			
+			-- TODO: Define struct type
+			
+			process_block(struct_statements)
+			
+			if var_decl ~= nil
+			then
+				local var_args   = var_decl[2]
+				local array_size = var_decl[3]
+				
+				process_statements(var_args)
+				process_statement(array_size)
+			end
+			
+		elseif op == "typedef"
+		then
+			local array_size = statement[6]
+			walk_optional(array_size)
+			
+		elseif op == "enum"
+		then
+			local members  = statement[6]
+			local var_decl = statement[8]
+			
+			for _, member_pair in pairs(members)
+			do
+				local member_name, member_expr = table.unpack(member_pair)
+				walk_optional(member_expr)
+			end
+			
+			if var_decl ~= nil
+			then
+				local var_args   = var_decl[2]
+				local array_size = var_decl[3]
+				
+				walk_array(var_args)
+				_walk_statement(array_size, func)
+			end
+			
+		elseif op == "if"
+		then
+			for i = 4, #statement
+			do
+				local cond = statement[i][2] and statement[i][1] or nil
+				local code = statement[i][2] or statement[i][1]
+				
+				if cond ~= nil
+				then
+					process_statement(cond)
+				end
+				
+				process_block(code)
+			end
+			
+		elseif op == "for"
+		then
+			local init_expr = statement[4]
+			local cond_expr = statement[5]
+			local iter_expr = statement[6]
+			local body      = statement[7]
+			
+			process_optional_statement(init_expr)
+			process_optional_statement(cond_expr)
+			process_optional_statement(iter_expr)
+			
+			process_block(body)
+			
+		elseif op == "switch"
+		then
+			
+		elseif op == "block"
+		then
+			process_block(statement[4])
+			
+		else
+			_visit_statement_children(statement, process_statement)
+		end
+	end
+	
+	process_optional_statement = function(statement)
+		if statement ~= nil
+		then
+			process_statement(statement)
+		end
+	end
+	
+	process_statements = function(statements)
+		for _, statement in ipairs(statements)
+		do
+			process_statement(statement)
+		end
+	end
+	
+	process_block = function(statements)
+		table.insert(block_stack, {})
+		process_statements(statements)
+		table.remove(block_stack)
+	end
+	
+	process_statements(statements)
+end
+
 --- External entry point into the interpreter
 -- @function execute
 --
@@ -2481,6 +2663,8 @@ _ops = {
 -- An error() may be raised within to abort the interpreter.
 
 local function execute(interface, statements)
+	statements = util.deep_copy_table(statements)
+	
 	local context = {
 		interface = interface,
 		
@@ -2491,13 +2675,8 @@ local function execute(interface, statements)
 		-- Each element points to a tuple of { type, value } like other rvalues.
 		global_vars = {},
 		
-		-- This table holds our current position in global_vars - under which new variables
-		-- be added and relative to which any lookups should be performed.
-		--
-		-- Each key will either be a tuple of { key, table }, where the key is a string
-		-- when we are descending into a struct member or a number where we are in an array
-		-- and the table is a reference to the element in global_vars at this point.
-		global_stack = {},
+		var_stack = {},
+		func_var_base = nil,
 		
 		next_variable = 0,
 		
@@ -2511,6 +2690,8 @@ local function execute(interface, statements)
 		st_stack = {},
 		
 		template_error = _template_error,
+		
+		valid_charsets = interface.get_valid_charsets(),
 	}
 	
 	for k, v in pairs(_builtin_functions)
@@ -2518,23 +2699,11 @@ local function execute(interface, statements)
 		context.functions[k] = v
 	end
 	
-	local base_types = {};
-	for k, v in pairs(_builtin_types)
-	do
-		base_types[k] = v
-	end
-	
-	local base_vars = {}
-	for k, v in pairs(_builtin_variables)
-	do
-		base_vars[k] = v
-	end
+	VarAllocator._allocate_variables(context, statements, _builtin_variables, _initialised_variable_placeholder)
+	TypeMapper._resolve_types(context, statements, _builtin_types)
 	
 	table.insert(context.stack, {
 		frame_type = FRAME_TYPE_BASE,
-		
-		var_types = base_types,
-		vars = base_vars,
 	})
 	
 	_exec_statements(context, statements)
@@ -2549,7 +2718,7 @@ local function execute(interface, statements)
 		
 		if type_info.is_array and type_info.base == "struct"
 		then
-			local elem_type = _make_nonarray_type(type_info)
+			local elem_type = util.make_nonarray_type(type_info)
 			
 			for i = 1, #value
 			do
@@ -2585,7 +2754,7 @@ local function execute(interface, statements)
 		
 		if type_info.is_array and type_info.base == "struct"
 		then
-			local elem_type = _make_nonarray_type(type_info)
+			local elem_type = util.make_nonarray_type(type_info)
 			
 			for i = 1, #value
 			do
@@ -2600,7 +2769,14 @@ local function execute(interface, statements)
 			-- for the range, else it would be displayed as a list of integers rather than a
 			-- contiguous byte sequence.
 			
-			if not (type_info.is_array and (type_info.type_key == _builtin_types.char.type_key or type_info.type_key == _builtin_types.uint8_t.type_key))
+			if value.charset ~= nil
+			then
+				local data_start, data_end = value:data_range()
+				if data_start ~= nil
+				then
+					context.interface.set_data_type(data_start, (data_end - data_start), "text:" .. value.charset)
+				end
+			elseif not (type_info.is_array and (type_info.type_key == _builtin_types.char.type_key or type_info.type_key == _builtin_types.uint8_t.type_key))
 			then
 				local data_start, data_end = value:data_range()
 				if data_start ~= nil

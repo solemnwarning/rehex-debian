@@ -89,7 +89,7 @@ namespace REHex {
 					Region(off_t indent_offset, off_t indent_length);
 					
 					virtual int calc_width(REHex::DocumentCtrl &doc);
-					virtual void calc_height(REHex::DocumentCtrl &doc, wxDC &dc) = 0;
+					virtual void calc_height(REHex::DocumentCtrl &doc) = 0;
 					
 					/* Draw this region on the screen.
 					 *
@@ -130,8 +130,8 @@ namespace REHex {
 						NoHighlight(): Highlight() {}
 					};
 					
-					static void draw_hex_line(DocumentCtrl *doc_ctrl, wxDC &dc, int x, int y, const unsigned char *data, size_t data_len, unsigned int pad_bytes, off_t base_off, bool alternate_row, const std::function<Highlight(off_t)> &highlight_at_off);
-					static void draw_ascii_line(DocumentCtrl *doc_ctrl, wxDC &dc, int x, int y, const unsigned char *data, size_t data_len, size_t data_extra_pre, size_t data_extra_post, off_t alignment_hint, unsigned int pad_bytes, off_t base_off, bool alternate_row, const std::function<Highlight(off_t)> &highlight_at_off);
+					static void draw_hex_line(DocumentCtrl *doc_ctrl, wxDC &dc, int x, int y, const unsigned char *data, size_t data_len, unsigned int pad_bytes, off_t base_off, bool alternate_row, const std::function<Highlight(off_t)> &highlight_at_off, bool is_last_line);
+					static void draw_ascii_line(DocumentCtrl *doc_ctrl, wxDC &dc, int x, int y, const unsigned char *data, size_t data_len, size_t data_extra_pre, size_t data_extra_post, off_t alignment_hint, unsigned int pad_bytes, off_t base_off, bool alternate_row, const std::function<Highlight(off_t)> &highlight_at_off, bool is_last_line);
 					
 					/**
 					 * @brief Calculate offset of byte at X co-ordinate.
@@ -329,7 +329,7 @@ namespace REHex {
 					
 				protected:
 					virtual int calc_width(REHex::DocumentCtrl &doc) override;
-					virtual void calc_height(REHex::DocumentCtrl &doc, wxDC &dc) override;
+					virtual void calc_height(REHex::DocumentCtrl &doc) override;
 					virtual void draw(REHex::DocumentCtrl &doc, wxDC &dc, int x, int64_t y) override;
 					virtual wxCursor cursor_for_point(REHex::DocumentCtrl &doc, int x, int64_t y_lines, int y_px) override;
 					
@@ -384,7 +384,7 @@ namespace REHex {
 				
 				bool truncate;
 				
-				virtual void calc_height(REHex::DocumentCtrl &doc, wxDC &dc) override;
+				virtual void calc_height(REHex::DocumentCtrl &doc) override;
 				virtual void draw(REHex::DocumentCtrl &doc, wxDC &dc, int x, int64_t y) override;
 				virtual wxCursor cursor_for_point(REHex::DocumentCtrl &doc, int x, int64_t y_lines, int y_px) override;
 				
@@ -517,6 +517,9 @@ namespace REHex {
 			 * Returns zero if the two offsets are equal, a negative integer if a is
 			 * less than b and a positive integer if a is greater than b.
 			 *
+			 * The exact positive/negative value is equal to the difference between the
+			 * offsets as described by the regions.
+			 *
 			 * Throws an exception of type std::invalid_argument if either of the
 			 * offsets are invalid.
 			*/
@@ -546,6 +549,29 @@ namespace REHex {
 			 * @brief Check if a range of offsets is linear and contiguous.
 			*/
 			bool region_range_linear(off_t begin_offset, off_t end_offset_incl);
+			
+			/**
+			 * @brief Returns the set of all bytes in the given (inclusive) range.
+			 *
+			 * Ranges are inserted into the returned set by their order as defined in
+			 * the regions list.
+			 *
+			 * NOTE: This method may be expensive to call, as it potentially has to
+			 * iterate through all (data) regions in the file.
+			*/
+			OrderedByteRangeSet region_range_expand(off_t begin_offset, off_t end_offset_incl);
+			
+			/**
+			 * @brief Convert a real file offset to a virtual one.
+			 * @return Virtual offset, negative if not valid.
+			*/
+			off_t region_offset_to_virt(off_t offset);
+			
+			/**
+			 * @brief Convert a virtual file offset to a real one.
+			 * @return Real offset, negative if not valid.
+			*/
+			off_t region_virt_to_offset(off_t virt_offset);
 			
 			wxFont &get_font();
 			
@@ -590,6 +616,9 @@ namespace REHex {
 			
 			/** List of iterators into data_regions, sorted by d_offset. */
 			std::vector< std::vector<GenericDataRegion*>::iterator > data_regions_sorted;
+			
+			/** List of iterators into data_regions, sorted by virt_offset. */
+			std::vector< std::vector<GenericDataRegion*>::iterator > data_regions_sorted_virt;
 			
 			/** Maximum virtual offset in data regions (plus one). */
 			off_t end_virt_offset;
@@ -662,6 +691,7 @@ namespace REHex {
 			GenericDataRegion::ScreenArea _get_screen_area_for_cursor_state();
 			
 			std::vector<GenericDataRegion*>::iterator _data_region_by_offset(off_t offset);
+			std::vector<GenericDataRegion*>::iterator _data_region_by_virt_offset(off_t offset);
 			
 			std::list<Region*>::iterator _region_by_y_offset(int64_t y_offset);
 			
@@ -795,7 +825,8 @@ namespace REHex {
 #endif
 			
 		public:
-			static std::list<wxString> format_text(const wxString &text, unsigned int cols, unsigned int from_line = 0, unsigned int max_lines = -1);
+			static std::list<wxString> wrap_text(const wxString &text, unsigned int cols);
+			static int wrap_text_height(const wxString &text, unsigned int cols);
 			int indent_width(int depth);
 			int get_offset_column_width();
 			int get_virtual_width();

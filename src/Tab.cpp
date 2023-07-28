@@ -1,5 +1,5 @@
 /* Reverse Engineer's Hex Editor
- * Copyright (C) 2017-2022 Daniel Collins <solemnwarning@solemnwarning.net>
+ * Copyright (C) 2017-2023 Daniel Collins <solemnwarning@solemnwarning.net>
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 as published by
@@ -16,11 +16,13 @@
 */
 
 #include "platform.hpp"
+#include <algorithm>
 #include <exception>
 #include <inttypes.h>
 #include <stack>
 #include <tuple>
 #include <vector>
+#include <wx/artprov.h>
 #include <wx/clipbrd.h>
 #include <wx/dataobj.h>
 #include <wx/sizer.h>
@@ -30,6 +32,7 @@
 #include "DiffWindow.hpp"
 #include "CharacterEncoder.hpp"
 #include "EditCommentDialog.hpp"
+#include "profile.hpp"
 #include "Tab.hpp"
 #include "VirtualMappingDialog.hpp"
 
@@ -75,7 +78,10 @@ REHex::Tab::Tab(wxWindow *parent):
 	htools_adjust_force(false),
 	htools_initial_size(-1),
 	repopulate_regions_frozen(false),
-	repopulate_regions_pending(false)
+	repopulate_regions_pending(false),
+	child_windows_hidden(false),
+	file_deleted_dialog_pending(false),
+	file_modified_dialog_pending(false)
 {
 	v_splitter = new wxSplitterWindow(this, ID_VSPLITTER, wxDefaultPosition, wxDefaultSize, (wxSP_3D | wxSP_LIVE_UPDATE));
 	v_splitter->SetSashGravity(1.0);
@@ -98,12 +104,16 @@ REHex::Tab::Tab(wxWindow *parent):
 	doc.auto_cleanup_bind(EV_TYPES_CHANGED,       &REHex::Tab::OnDocumentDataTypesChanged,  this);
 	doc.auto_cleanup_bind(EV_MAPPINGS_CHANGED,    &REHex::Tab::OnDocumentMappingsChanged,   this);
 	
+	doc.auto_cleanup_bind(BACKING_FILE_DELETED,  &REHex::Tab::OnDocumentFileDeleted,  this);
+	doc.auto_cleanup_bind(BACKING_FILE_MODIFIED, &REHex::Tab::OnDocumentFileModified, this);
+	
 	doc_ctrl->Bind(wxEVT_CHAR, &REHex::Tab::OnDocumentCtrlChar, this);
 	
-	doc.auto_cleanup_bind(CURSOR_UPDATE,         &REHex::Tab::OnEventToForward<CursorUpdateEvent>, this);
-	doc.auto_cleanup_bind(EV_UNDO_UPDATE,        &REHex::Tab::OnEventToForward<wxCommandEvent>,    this);
-	doc.auto_cleanup_bind(EV_BECAME_DIRTY,       &REHex::Tab::OnEventToForward<wxCommandEvent>,    this);
-	doc.auto_cleanup_bind(EV_BECAME_CLEAN,       &REHex::Tab::OnEventToForward<wxCommandEvent>,    this);
+	doc.auto_cleanup_bind(CURSOR_UPDATE,           &REHex::Tab::OnEventToForward<CursorUpdateEvent>,   this);
+	doc.auto_cleanup_bind(EV_UNDO_UPDATE,          &REHex::Tab::OnEventToForward<wxCommandEvent>,      this);
+	doc.auto_cleanup_bind(EV_BECAME_DIRTY,         &REHex::Tab::OnEventToForward<wxCommandEvent>,      this);
+	doc.auto_cleanup_bind(EV_BECAME_CLEAN,         &REHex::Tab::OnEventToForward<wxCommandEvent>,      this);
+	doc.auto_cleanup_bind(DOCUMENT_TITLE_CHANGED,  &REHex::Tab::OnEventToForward<DocumentTitleEvent>,  this);
 	
 	repopulate_regions();
 	
@@ -149,7 +159,10 @@ REHex::Tab::Tab(wxWindow *parent, SharedDocumentPointer &document):
 	htools_adjust_force(false),
 	htools_initial_size(-1),
 	repopulate_regions_frozen(false),
-	repopulate_regions_pending(false)
+	repopulate_regions_pending(false),
+	child_windows_hidden(false),
+	file_deleted_dialog_pending(false),
+	file_modified_dialog_pending(false)
 {
 	v_splitter = new wxSplitterWindow(this, ID_VSPLITTER, wxDefaultPosition, wxDefaultSize, (wxSP_3D | wxSP_LIVE_UPDATE));
 	v_splitter->SetSashGravity(1.0);
@@ -172,12 +185,16 @@ REHex::Tab::Tab(wxWindow *parent, SharedDocumentPointer &document):
 	doc.auto_cleanup_bind(EV_TYPES_CHANGED,       &REHex::Tab::OnDocumentDataTypesChanged,  this);
 	doc.auto_cleanup_bind(EV_MAPPINGS_CHANGED,    &REHex::Tab::OnDocumentMappingsChanged,   this);
 	
+	doc.auto_cleanup_bind(BACKING_FILE_DELETED,  &REHex::Tab::OnDocumentFileDeleted,  this);
+	doc.auto_cleanup_bind(BACKING_FILE_MODIFIED, &REHex::Tab::OnDocumentFileModified, this);
+	
 	doc_ctrl->Bind(wxEVT_CHAR, &REHex::Tab::OnDocumentCtrlChar, this);
 	
-	doc.auto_cleanup_bind(CURSOR_UPDATE,         &REHex::Tab::OnEventToForward<CursorUpdateEvent>, this);
-	doc.auto_cleanup_bind(EV_UNDO_UPDATE,        &REHex::Tab::OnEventToForward<wxCommandEvent>,    this);
-	doc.auto_cleanup_bind(EV_BECAME_DIRTY,       &REHex::Tab::OnEventToForward<wxCommandEvent>,    this);
-	doc.auto_cleanup_bind(EV_BECAME_CLEAN,       &REHex::Tab::OnEventToForward<wxCommandEvent>,    this);
+	doc.auto_cleanup_bind(CURSOR_UPDATE,           &REHex::Tab::OnEventToForward<CursorUpdateEvent>,   this);
+	doc.auto_cleanup_bind(EV_UNDO_UPDATE,          &REHex::Tab::OnEventToForward<wxCommandEvent>,      this);
+	doc.auto_cleanup_bind(EV_BECAME_DIRTY,         &REHex::Tab::OnEventToForward<wxCommandEvent>,      this);
+	doc.auto_cleanup_bind(EV_BECAME_CLEAN,         &REHex::Tab::OnEventToForward<wxCommandEvent>,      this);
+	doc.auto_cleanup_bind(DOCUMENT_TITLE_CHANGED,  &REHex::Tab::OnEventToForward<DocumentTitleEvent>,  this);
 	
 	repopulate_regions();
 	
@@ -319,6 +336,8 @@ void REHex::Tab::search_dialog_register(wxDialog *search_dialog)
 
 void REHex::Tab::hide_child_windows()
 {
+	child_windows_hidden = true;
+	
 	for(auto sdi = search_dialogs.begin(); sdi != search_dialogs.end(); ++sdi)
 	{
 		(*sdi)->Hide();
@@ -327,9 +346,21 @@ void REHex::Tab::hide_child_windows()
 
 void REHex::Tab::unhide_child_windows()
 {
+	child_windows_hidden = false;
+	
 	for(auto sdi = search_dialogs.begin(); sdi != search_dialogs.end(); ++sdi)
 	{
 		(*sdi)->ShowWithoutActivating();
+	}
+	
+	if(file_deleted_dialog_pending)
+	{
+		file_modified_dialog_pending = false;
+		file_deleted_dialog();
+	}
+	else if(file_modified_dialog_pending)
+	{
+		file_modified_dialog();
 	}
 }
 
@@ -881,6 +912,14 @@ void REHex::Tab::OnCommentRightClick(OffsetLengthEvent &event)
 		doc->erase_comment(c_offset, c_length);
 	}, delete_comment->GetId(), delete_comment->GetId());
 	
+	wxMenuItem *delete_comment_rec = menu.Append(wxID_ANY, "Delete comment &and children");
+	menu.Bind(wxEVT_MENU, [&](wxCommandEvent &event)
+	{
+		doc->erase_comment_recursive(c_offset, c_length);
+	}, delete_comment_rec->GetId(), delete_comment_rec->GetId());
+	
+	delete_comment_rec->Enable(c_length > 0);
+	
 	menu.AppendSeparator();
 	
 	wxMenuItem *copy_comments = menu.Append(wxID_ANY,  "&Copy comment(s)");
@@ -889,9 +928,24 @@ void REHex::Tab::OnCommentRightClick(OffsetLengthEvent &event)
 		ClipboardGuard cg;
 		if(cg)
 		{
-			const NestedOffsetLengthMap<Document::Comment> &comments = doc->get_comments();
+			const ByteRangeTree<Document::Comment> &comments = doc->get_comments();
+			const ByteRangeTree<Document::Comment>::Node *root_comment = comments.find_node(ByteRangeTreeKey(c_offset, c_length));
 			
-			auto selected_comments = NestedOffsetLengthMap_get_recursive(comments, NestedOffsetLengthMapKey(c_offset, c_length));
+			std::list< ByteRangeTree<Document::Comment>::const_iterator > selected_comments;
+			
+			std::function<void(const ByteRangeTree<Document::Comment>::Node*)> add_comment;
+			add_comment = [&](const ByteRangeTree<Document::Comment>::Node *comment)
+			{
+				selected_comments.push_back(comments.find(comment->key));
+				
+				for(comment = comment->get_first_child(); comment != NULL; comment = comment->get_next())
+				{
+					add_comment(comment);
+				}
+			};
+			
+			add_comment(root_comment);
+			
 			assert(selected_comments.size() > 0);
 			
 			wxTheClipboard->SetData(new CommentsDataObject(selected_comments, c_offset));
@@ -908,8 +962,8 @@ void REHex::Tab::OnDataRightClick(wxCommandEvent &event)
 	off_t selection_off, selection_length;
 	std::tie(selection_off, selection_length) = doc_ctrl->get_selection_linear();
 	
-	const NestedOffsetLengthMap<Document::Comment> &comments   = doc->get_comments();
-	const NestedOffsetLengthMap<int>               &highlights = doc->get_highlights();
+	const ByteRangeTree<Document::Comment> &comments = doc->get_comments();
+	const NestedOffsetLengthMap<int>     &highlights = doc->get_highlights();
 	
 	wxMenu menu;
 	
@@ -951,17 +1005,16 @@ void REHex::Tab::OnDataRightClick(wxCommandEvent &event)
 	
 	menu.AppendSeparator();
 	
-	auto comments_at_cur = NestedOffsetLengthMap_get_all(comments, cursor_pos);
-	for(auto i = comments_at_cur.begin(); i != comments_at_cur.end(); ++i)
+	for(auto comment = comments.find_most_specific_parent(cursor_pos);
+		comment != NULL;
+		comment = comment->get_parent())
 	{
-		auto ci = *i;
-		
-		wxString text = ci->second.menu_preview();
+		wxString text = comment->value.menu_preview();
 		wxMenuItem *itm = menu.Append(wxID_ANY, wxString("Edit \"") + text + "\"...");
 		
-		menu.Bind(wxEVT_MENU, [this, ci](wxCommandEvent &event)
+		menu.Bind(wxEVT_MENU, [this, comment](wxCommandEvent &event)
 		{
-			EditCommentDialog::run_modal(this, doc, ci->first.offset, ci->first.length);
+			EditCommentDialog::run_modal(this, doc, comment->key.offset, comment->key.length);
 		}, itm->GetId(), itm->GetId());
 	}
 	
@@ -978,7 +1031,7 @@ void REHex::Tab::OnDataRightClick(wxCommandEvent &event)
 	
 	if(selection_length > 0
 		&& comments.find(NestedOffsetLengthMapKey(selection_off, selection_length)) == comments.end()
-		&& NestedOffsetLengthMap_can_set(comments, selection_off, selection_length))
+		&& comments.can_set(selection_off, selection_length))
 	{
 		char menu_label[64];
 		snprintf(menu_label, sizeof(menu_label), "Set comment on %" PRId64 " bytes...", (int64_t)(selection_length));
@@ -1252,6 +1305,134 @@ void REHex::Tab::OnDocumentMappingsChanged(wxCommandEvent &event)
 	}
 	
 	event.Skip();
+}
+
+void REHex::Tab::OnDocumentFileDeleted(wxCommandEvent &event)
+{
+	OnEventToForward(event);
+	file_deleted_dialog();
+}
+
+void REHex::Tab::file_deleted_dialog()
+{
+	if(child_windows_hidden)
+	{
+		file_deleted_dialog_pending = true;
+		return;
+	}
+	
+	file_deleted_dialog_pending = false;
+	
+	wxMessageDialog confirm(
+		this,
+		(wxString("The file ") + doc->get_filename() + " has been deleted from disk."),
+		"File deleted",
+		(wxYES_NO | wxCANCEL | wxCENTER));
+	
+	confirm.SetYesNoCancelLabels("Save", "Save As", "Ignore");
+	
+	int response = confirm.ShowModal();
+	switch(response)
+	{
+		case wxID_YES:
+		{
+			try {
+				doc->save();
+			}
+			catch(const std::exception &e)
+			{
+				wxMessageBox(
+					std::string("Error saving ") + doc->get_title() + ":\n" + e.what(),
+					"Error", wxICON_ERROR, this);
+			}
+			
+			break;
+		}
+		
+		case wxID_NO:
+		{
+			std::string new_filename = document_save_as_dialog(this, doc);
+			if(new_filename == "")
+			{
+				/* Cancelled. */
+				return;
+			}
+			
+			try {
+				doc->save(new_filename);
+			}
+			catch(const std::exception &e)
+			{
+				wxMessageBox(
+					std::string("Error saving ") + doc->get_title() + ":\n" + e.what(),
+					"Error", wxICON_ERROR, this);
+			}
+			
+			break;
+		}
+		
+		default:
+		{
+			/* Ignore */
+			break;
+		}
+	}
+}
+
+void REHex::Tab::OnDocumentFileModified(wxCommandEvent &event)
+{
+	OnEventToForward(event);
+	file_modified_dialog();
+}
+
+void REHex::Tab::file_modified_dialog()
+{
+	if(child_windows_hidden)
+	{
+		file_modified_dialog_pending = true;
+	}
+	
+	file_modified_dialog_pending = false;
+	
+	if(doc->is_dirty())
+	{
+		wxMessageDialog confirm(
+			this,
+			(wxString("The file ") + doc->get_filename() + " has been modified externally AND in the editor.\n"
+				+ "DISCARD YOUR CHANGES and reload the file?"),
+			"File modified",
+			(wxYES_NO | wxICON_EXCLAMATION | wxCENTER));
+		
+		int response = confirm.ShowModal();
+		if(response == wxNO)
+		{
+			return;
+		}
+	}
+	else{
+		wxMessageDialog confirm(
+			this,
+			(wxString("The file ") + doc->get_filename() + " has been modified externally.\n"
+				+ "Do you want to reload the file?"),
+			"File modified",
+			(wxYES_NO | wxICON_EXCLAMATION | wxCENTER));
+		
+		int response = confirm.ShowModal();
+		if(response == wxNO)
+		{
+			return;
+		}
+	}
+	
+	try {
+		doc->reload();
+	}
+	catch(const std::exception &e)
+	{
+		wxMessageBox(
+			std::string("Error reloading ") + doc->get_title() + ":\n" + e.what(),
+			"Error", wxICON_ERROR, this);
+	}
 }
 
 void REHex::Tab::OnBulkUpdatesFrozen(wxCommandEvent &event)
@@ -1649,6 +1830,8 @@ void REHex::Tab::init_default_tools()
 
 void REHex::Tab::repopulate_regions()
 {
+	PROFILE_BLOCK("REHex::Tab::repopulate_regions");
+	
 	if(repopulate_regions_frozen)
 	{
 		repopulate_regions_pending = true;
@@ -1660,6 +1843,8 @@ void REHex::Tab::repopulate_regions()
 	if(document_display_mode == DDM_VIRTUAL)
 	{
 		/* Virtual segments view. */
+		
+		PROFILE_INNER_BLOCK("prepare regions (virtual)");
 		
 		const ByteRangeMap<off_t> &virt_to_real_segs = doc->get_virt_to_real_segs();
 		
@@ -1686,6 +1871,8 @@ void REHex::Tab::repopulate_regions()
 		/* File view. */
 		DO_FILE_VIEW:
 		
+		PROFILE_INNER_BLOCK("prepare regions (file)");
+		
 		std::vector<DocumentCtrl::Region*> file_regions = compute_regions(doc, 0, 0, doc->buffer_length(), inline_comment_mode);
 		
 		if(file_regions.empty())
@@ -1708,7 +1895,10 @@ void REHex::Tab::repopulate_regions()
 		regions.insert(regions.end(), file_regions.begin(), file_regions.end());
 	}
 	
-	doc_ctrl->replace_all_regions(regions);
+	{
+		PROFILE_INNER_BLOCK("replace regions");
+		doc_ctrl->replace_all_regions(regions);
+	}
 }
 
 void REHex::Tab::repopulate_regions_freeze()
@@ -1729,26 +1919,43 @@ void REHex::Tab::repopulate_regions_thaw()
 
 std::vector<REHex::DocumentCtrl::Region*> REHex::Tab::compute_regions(SharedDocumentPointer doc, off_t real_offset_base, off_t virt_offset_base, off_t length, InlineCommentMode inline_comment_mode)
 {
-	auto comments = doc->get_comments();
-	auto types = doc->get_data_types();
+	auto &comments = doc->get_comments();
+	auto &types = doc->get_data_types();
 	
 	bool nest = (inline_comment_mode == ICM_SHORT_INDENT || inline_comment_mode == ICM_FULL_INDENT);
 	bool truncate = (inline_comment_mode == ICM_SHORT || inline_comment_mode == ICM_SHORT_INDENT);
 	
 	/* Construct a list of interlaced comment/data regions. */
 	
-	auto offset_base = comments.begin();
+	auto next_comment = comments.first_root_node();
 	auto types_iter = types.begin();
 	off_t next_data = real_offset_base, next_virt = virt_offset_base, remain_data = length;
 	
 	/* Skip over comments/types prior to real_offset_base. */
-	while(offset_base != comments.end() && offset_base->first.offset < next_data) { ++offset_base; }
+	while(next_comment != NULL && next_comment->key.offset < next_data)
+	{
+		auto first_child = next_comment->get_first_child();
+		
+		if(first_child != NULL && (first_child->key.offset == next_comment->key.offset || first_child->key.offset >= next_data))
+		{
+			next_comment = next_comment->get_first_child();
+		}
+		else{
+			while(next_comment->get_next() == NULL && next_comment->get_parent() != NULL)
+			{
+				next_comment = next_comment->get_parent();
+			}
+			
+			next_comment = next_comment->get_next();
+		}
+	}
+	
 	while(types_iter != types.end() && (types_iter->first.offset + types_iter->first.length <= next_data)) { ++types_iter; }
 	
 	if(inline_comment_mode == ICM_HIDDEN)
 	{
 		/* Inline comments are hidden. Skip over the comments. */
-		offset_base = comments.end();
+		next_comment = NULL;
 	}
 	
 	std::vector<DocumentCtrl::Region*> regions;
@@ -1757,7 +1964,7 @@ std::vector<REHex::DocumentCtrl::Region*> REHex::Tab::compute_regions(SharedDocu
 	while(remain_data > 0)
 	{
 		assert((next_data + remain_data) <= doc->buffer_length());
-		assert(offset_base == comments.end() || offset_base->first.offset >= next_data);
+		assert(next_comment == NULL || next_comment->key.offset >= next_data);
 		
 		while(!dr_limit.empty() && dr_limit.top() <= next_data)
 		{
@@ -1766,53 +1973,48 @@ std::vector<REHex::DocumentCtrl::Region*> REHex::Tab::compute_regions(SharedDocu
 		
 		/* We process any comments at the same offset from largest to smallest, ensuring
 		 * smaller comments are parented to the next-larger one at the same offset.
-		 *
-		 * This could be optimised by changing the order of keys in the comments map, but
-		 * that'll probably break something...
 		*/
 		
-		if(offset_base != comments.end() && offset_base->first.offset == next_data)
+		while(next_comment != NULL && next_comment->key.offset == next_data)
 		{
-			auto next_offset = offset_base;
-			while(next_offset != comments.end() && next_offset->first.offset == offset_base->first.offset)
+			off_t indent_offset = next_virt;
+			off_t indent_length = nest
+				? std::min(next_comment->key.length, remain_data)
+				: 0;
+			
+			regions.push_back(new DocumentCtrl::CommentRegion(
+				next_comment->key.offset,
+				next_comment->key.length,
+				*(next_comment->value.text),
+				truncate,
+				indent_offset,
+				indent_length));
+			
+			if(nest && next_comment->key.length > 0)
 			{
-				++next_offset;
+				assert(dr_limit.empty() || dr_limit.top() >= next_comment->key.offset + next_comment->key.length);
+				dr_limit.push(next_comment->key.offset + next_comment->key.length);
 			}
 			
-			auto c = next_offset;
-			do {
-				--c;
-				
-				assert(c->first.offset == next_data);
-				
-				off_t indent_offset = next_virt;
-				off_t indent_length = nest
-					? std::min(c->first.length, remain_data)
-					: 0;
-				
-				regions.push_back(new DocumentCtrl::CommentRegion(
-					c->first.offset,
-					c->first.length,
-					*(c->second.text),
-					truncate,
-					indent_offset,
-					indent_length));
-				
-				if(nest && c->first.length > 0)
+			if(next_comment->get_first_child() != NULL)
+			{
+				next_comment = next_comment->get_first_child();
+			}
+			else{
+				while(next_comment->get_next() == NULL && next_comment->get_parent() != NULL)
 				{
-					assert(dr_limit.empty() || dr_limit.top() >= c->first.offset + c->first.length);
-					dr_limit.push(c->first.offset + c->first.length);
+					next_comment = next_comment->get_parent();
 				}
-			} while(c != offset_base);
-			
-			offset_base = next_offset;
+				
+				next_comment = next_comment->get_next();
+			}
 		}
 		
 		off_t dr_length = remain_data;
 		
-		if(offset_base != comments.end() && dr_length > (offset_base->first.offset - next_data))
+		if(next_comment != NULL && dr_length > (next_comment->key.offset - next_data))
 		{
-			dr_length = offset_base->first.offset - next_data;
+			dr_length = next_comment->key.offset - next_data;
 		}
 		
 		if(!dr_limit.empty() && (next_data + dr_length) >= dr_limit.top())
