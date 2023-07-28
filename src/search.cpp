@@ -21,12 +21,14 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/types.h>
+#include <unicase.h>
 #include <utility>
 #include <wx/msgdlg.h>
 #include <wx/sizer.h>
 #include <wx/statbox.h>
 #include <wx/statline.h>
 
+#include "CharacterEncoder.hpp"
 #include "NumericTextCtrl.hpp"
 #include "search.hpp"
 #include "util.hpp"
@@ -74,7 +76,10 @@ END_EVENT_TABLE()
 REHex::Search::Search(wxWindow *parent, SharedDocumentPointer &doc, const char *title):
 	wxDialog(parent, wxID_ANY, title),
 	doc(doc), range_begin(0), range_end(-1), align_to(1), align_from(0), match_found_at(-1), running(false),
-	timer(this, ID_TIMER)
+	timer(this, ID_TIMER),
+	auto_close(false),
+	auto_wrap(false),
+	modal_parent(this)
 {}
 
 void REHex::Search::setup_window()
@@ -173,6 +178,21 @@ void REHex::Search::require_alignment(off_t alignment, off_t relative_to_offset)
 	align_from = relative_to_offset;
 }
 
+void REHex::Search::set_auto_close(bool auto_close)
+{
+	this->auto_close = auto_close;
+}
+
+void REHex::Search::set_auto_wrap(bool auto_wrap)
+{
+	this->auto_wrap = auto_wrap;
+}
+
+void REHex::Search::set_modal_parent(wxWindow *modal_parent)
+{
+	this->modal_parent = modal_parent;
+}
+
 /* This method is only used by the unit tests. */
 off_t REHex::Search::find_next(off_t from_offset, size_t window_size)
 {
@@ -230,7 +250,7 @@ void REHex::Search::begin_search(off_t sub_range_begin, off_t sub_range_end, Sea
 		threads.emplace_back(&REHex::Search::thread_main, this, window_size, compare_size);
 	}
 	
-	progress = new wxProgressDialog("Searching", "Search in progress...", 100, this, wxPD_CAN_ABORT | wxPD_REMAINING_TIME);
+	progress = new wxProgressDialog("Searching", "Search in progress...", 100, modal_parent, wxPD_CAN_ABORT | wxPD_REMAINING_TIME);
 	timer.Start(200, wxTIMER_CONTINUOUS);
 }
 
@@ -281,6 +301,12 @@ void REHex::Search::OnTimer(wxTimerEvent &event)
 	if(progress->WasCancelled())
 	{
 		end_search();
+		
+		if(auto_close)
+		{
+			Destroy();
+		}
+		
 		return;
 	}
 	
@@ -303,9 +329,10 @@ void REHex::Search::OnTimer(wxTimerEvent &event)
 					? "Not found. Continue search from start of range?"
 					: "Not found. Continue search from start of file?";
 				
-				if(wrap_query(message))
+				if(auto_wrap || wrap_query(message))
 				{
 					begin_search(range_begin, search_base + compare_size, SearchDirection::FORWARDS);
+					return;
 				}
 			}
 			else if(search_direction == SearchDirection::BACKWARDS && search_end < range_end)
@@ -316,14 +343,20 @@ void REHex::Search::OnTimer(wxTimerEvent &event)
 					? "Not found. Continue search from end of range?"
 					: "Not found. Continue search from end of file?";
 				
-				if(wrap_query(message))
+				if(auto_wrap || wrap_query(message))
 				{
 					begin_search(search_end - compare_size, range_end, SearchDirection::BACKWARDS);
+					return;
 				}
 			}
 			else{
 				not_found_notification();
 			}
+		}
+		
+		if(auto_close)
+		{
+			Destroy();
 		}
 	}
 	else{
@@ -506,12 +539,15 @@ void REHex::Search::thread_main(size_t window_size, size_t compare_size)
 	}
 }
 
-REHex::Search::Text::Text(wxWindow *parent, SharedDocumentPointer &doc, const std::string &search_for, bool case_sensitive):
+REHex::Search::Text::Text(wxWindow *parent, SharedDocumentPointer &doc, const wxString &search_for, bool case_sensitive, const std::string &encoding):
 	Search(parent, doc, "Search for text"),
-	search_for(search_for),
-	case_sensitive(case_sensitive)
+	case_sensitive(case_sensitive),
+	cmp_fast_path(encoding == "ASCII"),
+	initial_encoding(encoding)
 {
 	setup_window();
+	
+	set_search_string(search_for);
 }
 
 /* NOTE: end_search() is called from subclass destructor rather than base to ensure search is
@@ -528,15 +564,89 @@ REHex::Search::Text::~Text()
 
 bool REHex::Search::Text::test(const void *data, size_t data_size)
 {
-	if(case_sensitive)
+	if(cmp_fast_path)
 	{
-		return (data_size >= search_for.size()
-			&& strncmp((const char*)(data), search_for.c_str(), search_for.size()) == 0);
+		/* Fast path for ASCII text searches.
+		 *
+		 * All the Unicode normalisation below slows the search down to a crawl, so avoid
+		 * it if we can.
+		 *
+		 * This path takes ~25s to process a 4GB sample on my machine, ~10m via the slow
+		 * path - a 24x slow down.
+		*/
+		if(case_sensitive)
+		{
+			return data_size >= search_for.size()
+				&& strncmp((const char*)(data), search_for.data(), search_for.size()) == 0;
+		}
+		else{
+			return data_size >= search_for.size()
+				&& strncasecmp((const char*)(data), search_for.data(), search_for.size()) == 0;
+		}
 	}
-	else{
-		return (data_size >= search_for.size()
-			&& strncasecmp((const char*)(data), search_for.c_str(), search_for.size()) == 0);
+	
+	/* We read data in character by character, trying to decode it using the search character
+	 * set and then normalising (decomposing any combining characters) and optionally case
+	 * folding characters as we go.
+	 *
+	 * Since the search query is normalised in the same way, we can memcmp() each character
+	 * (or group of characters, in the case of a decomposed character) against search_for as we
+	 * go until we reach the end (strings match) or a mismatch is found.
+	*/
+	
+	uint8_t *norm_buf = NULL;
+	size_t norm_size = 0;
+	
+	const char *next_cmp = search_for.data();
+	size_t remain_cmp = search_for.size();
+	
+	for(size_t i = 0; i < data_size && remain_cmp > 0;)
+	{
+		EncodedCharacter c = encoding->encoder->decode(((const char*)(data) + i), (data_size - i));
+		if(!c.valid)
+		{
+			break;
+		}
+		
+		size_t ns = norm_size;
+		uint8_t *nc = case_sensitive
+			? u8_normalize(UNINORM_NFD, (const uint8_t*)(c.utf8_char().data()), c.utf8_char().size(), norm_buf, &ns)
+			: u8_casefold((const uint8_t*)(c.utf8_char().data()), c.utf8_char().size(), NULL, UNINORM_NFD, norm_buf, &ns);
+		
+		if(nc != NULL)
+		{
+			if(nc != norm_buf)
+			{
+				free(norm_buf);
+				norm_buf = nc;
+				norm_size = ns;
+			}
+		}
+		else{
+			/* Normalisation failed (I don't know if there's any way this can happen),
+			 * so fall back to comparing the original decoded character. This will
+			 * match so long as the file data is normalised the same way, and cased the
+			 * same.
+			*/
+			
+			nc = (uint8_t*)(c.utf8_char().data());
+			ns = c.utf8_char().size();
+		}
+		
+		if(ns > remain_cmp || memcmp(nc, next_cmp, ns) != 0)
+		{
+			break;
+		}
+		
+		next_cmp += ns;
+		remain_cmp -= ns;
+		
+		i += c.encoded_char().size();
 	}
+	
+	free(norm_buf);
+	
+	return remain_cmp == 0;
 }
 
 size_t REHex::Search::Text::test_max_window()
@@ -561,16 +671,80 @@ void REHex::Search::Text::setup_window_controls(wxWindow *parent, wxSizer *sizer
 		case_sensitive_cb = new wxCheckBox(parent, wxID_ANY, "Case sensitive");
 		sizer->Add(case_sensitive_cb, 0, wxTOP | wxLEFT | wxRIGHT, 10);
 	}
+	
+	{
+		wxBoxSizer *enc_sizer = new wxBoxSizer(wxHORIZONTAL);
+		
+		enc_sizer->Add(new wxStaticText(parent, wxID_ANY, "Charcter set: "), 0, wxALIGN_CENTER_VERTICAL);
+		
+		encoding_choice = new wxChoice(parent, wxID_ANY);
+		enc_sizer->Add(encoding_choice, 0, wxLEFT, 10);
+		
+		auto all_encodings = CharacterEncoding::all_encodings();
+		int idx = 0;
+		
+		for(auto i = all_encodings.begin(); i != all_encodings.end(); ++i, ++idx)
+		{
+			const CharacterEncoding *ce = *i;
+			encoding_choice->Append(ce->label, (void*)(ce));
+			
+			if(ce->key == initial_encoding)
+			{
+				encoding_choice->SetSelection(idx);
+				encoding = ce;
+			}
+		}
+		
+		sizer->Add(enc_sizer, 0, wxTOP | wxLEFT | wxRIGHT, 10);
+	}
+}
+
+bool REHex::Search::Text::set_search_string(const wxString &search_for)
+{
+	std::string search_for_utf8(search_for.utf8_str());
+	
+	size_t ns = 0;
+	uint8_t *nd = case_sensitive
+		? u8_normalize(UNINORM_NFD, (const uint8_t*)(search_for_utf8.data()), search_for_utf8.size(), NULL, &ns)
+		: u8_casefold((const uint8_t*)(search_for_utf8.data()), search_for_utf8.size(), NULL, UNINORM_NFD, NULL, &ns);
+	
+	if(nd != NULL)
+	{
+		this->search_for = std::string((const char*)(nd), ns);
+		search_for_tc->SetValue(search_for_utf8);
+	}
+	else{
+		/* Not sure if this can/should ever fail... fall back to un-normalised input. */
+		
+		this->search_for = search_for_utf8;
+		search_for_tc->SetValue(search_for_utf8);
+	}
+	
+	free(nd);
+	
+	return true;
 }
 
 bool REHex::Search::Text::read_window_controls()
 {
-	search_for     = search_for_tc->GetValue();
 	case_sensitive = case_sensitive_cb->GetValue();
+	
+	const CharacterEncoding *ce = (const CharacterEncoding*)(encoding_choice->GetClientData(encoding_choice->GetSelection()));
+	encoding = ce;
+	
+	cmp_fast_path = encoding->key == "ASCII";
+	
+	wxString search_for = search_for_tc->GetValue();
 	
 	if(search_for.empty())
 	{
 		wxMessageBox("Please enter a string to search for", "Error", (wxOK | wxICON_EXCLAMATION | wxCENTRE), this);
+		return false;
+	}
+	
+	if(!set_search_string(search_for))
+	{
+		wxMessageBox("The string cannot be encoded in the chosen character set", "Error", (wxOK | wxICON_EXCLAMATION | wxCENTRE), this);
 		return false;
 	}
 	

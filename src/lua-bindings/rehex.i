@@ -1,4 +1,5 @@
 #include "../App.hpp"
+#include "../CharacterEncoder.hpp"
 #include "../document.hpp"
 #include "../mainwindow.hpp"
 
@@ -95,6 +96,8 @@ class REHex::Document: public wxEvtHandler
 	off_t real_to_virt_offset(off_t real_offset) const;
 	off_t virt_to_real_offset(off_t virt_offset) const;
 	
+	off_t get_cursor_position() const;
+	
 	void transact_begin(const wxString &desc);
 	void transact_commit();
 	void transact_rollback();
@@ -115,4 +118,13 @@ class REHex::TabCreatedEvent: public wxEvent
 	
 	// Filthy hack to get the MainWindow handle into Lua land rather than an opaque userdata.
 	REHex::MainWindow *GetEventObject();
+};
+
+class REHex::CharacterEncoding
+{
+	const wxString key;
+	const wxString label;
+	
+	static const REHex::CharacterEncoding *encoding_by_key(const wxString &key);
+	static LuaTable all_encodings();
 };

@@ -1,5 +1,5 @@
 # Reverse Engineer's Hex Editor
-# Copyright (C) 2021-2022 Daniel Collins <solemnwarning@solemnwarning.net>
+# Copyright (C) 2021-2023 Daniel Collins <solemnwarning@solemnwarning.net>
 #
 # This program is free software; you can redistribute it and/or modify it
 # under the terms of the GNU General Public License version 2 as published by
@@ -14,10 +14,10 @@
 # this program; if not, write to the Free Software Foundation, Inc., 51
 # Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 
-_rehex_capstone_version="4.0.2"
-_rehex_capstone_url="https://github.com/aquynh/capstone/archive/${_rehex_capstone_version}.tar.gz"
-_rehex_capstone_sha256="7c81d798022f81e7507f1a60d6817f63aa76e489aa4e7055255f21a22f5e526a"
-_rehex_capstone_build_ident="${_rehex_capstone_version}-2"
+_rehex_capstone_version="5.0"
+_rehex_capstone_url="https://github.com/capstone-engine/capstone/archive/refs/tags/${_rehex_capstone_version}.tar.gz"
+_rehex_capstone_sha256="df24344407baa7415eeb006f742afc9b92cd33abf2c4c120a6e97cfb376882dc"
+_rehex_capstone_build_ident="${_rehex_capstone_version}-1"
 
 _rehex_jansson_version="2.14"
 _rehex_jansson_url="https://github.com/akheron/jansson/releases/download/v${_rehex_jansson_version}/jansson-${_rehex_jansson_version}.tar.gz"
@@ -38,9 +38,9 @@ _rehex_luarocks_version="3.8.0"
 _rehex_luarocks_url="https://luarocks.org/releases/luarocks-${_rehex_luarocks_version}.tar.gz"
 _rehex_luarocks_sha256="56ab9b90f5acbc42eb7a94cf482e6c058a63e8a1effdf572b8b2a6323a06d923"
 
-_rehex_wxwidgets_version="3.2.1"
+_rehex_wxwidgets_version="3.2.2.1"
 _rehex_wxwidgets_url="https://github.com/wxWidgets/wxWidgets/releases/download/v${_rehex_wxwidgets_version}/wxWidgets-${_rehex_wxwidgets_version}.tar.bz2"
-_rehex_wxwidgets_sha256="c229976bb413eb88e45cb5dfb68b27890d450149c09b331abd751e7ae0f5fa66"
+_rehex_wxwidgets_sha256="dffcb6be71296fff4b7f8840eb1b510178f57aa2eb236b20da41182009242c02"
 _rehex_wxwidgets_build_ident="${_rehex_wxwidgets_version}-1"
 
 _rehex_cpanm_version="1.7044"

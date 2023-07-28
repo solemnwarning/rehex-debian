@@ -20,7 +20,9 @@
 
 #include "AppSettings.hpp"
 #include "ConsoleBuffer.hpp"
+#include "IPC.hpp"
 #include "mainwindow.hpp"
+#include "ThreadPool.hpp"
 
 #include <functional>
 #include <map>
@@ -51,6 +53,7 @@ namespace REHex {
 			wxLocale *locale;
 			
 			ConsoleBuffer *console;
+			ThreadPool *thread_pool;
 			
 			/**
 			 * @brief Get the last directory browsed to in a load/save dialog.
@@ -202,6 +205,7 @@ namespace REHex {
 			
 			virtual bool OnInit() override;
 			virtual int OnExit() override;
+			virtual int OnRun() override;
 			
 			#ifdef __APPLE__
 			virtual void MacOpenFiles(const wxArrayString &fileNames) override;
@@ -228,8 +232,12 @@ namespace REHex {
 			static std::multimap<SetupPhase, const SetupHookFunction*> *setup_hooks;
 			void call_setup_hooks(SetupPhase phase);
 			
-			void OnMainWindowShow(wxShowEvent &event);
-			void OnDiffWindowClose(wxCloseEvent &event);
+			void OnTabDropped(DetachedPageEvent &event);
+			
+			IPCServer *ipc_server;
+			
+			bool quick_exit;
+			int quick_exit_code;
 			
 		public:
 			void _test_setup_hooks(SetupPhase phase);
