@@ -11,6 +11,8 @@ This page lists all the built-in functions available for templates.
 <ul>
 <li><a href="#iofunc">I/O Functions</a></li>
 <li><a href="#arrayfunc">Array Functions</a></li>
+<li><a href="#stringfunc">String Functions</a></li>
+<li><a href="#metafunc">Metadata Functions</a></li>
 </ul>
 
 <a name="iofunc"><h3>I/O Functions</h3></a>
@@ -112,11 +114,42 @@ Calling any of these functions with an invalid offset will result in a template 
 
 <hr>
 [% WRAPPER "code.tt" -%]
+[% WRAPPER "code-type.tt" %]string[% END %] ReadString([% WRAPPER "code-type.tt" %]int64_t[% END %] offset = FTell(), [% WRAPPER "code-type.tt" %]uint8_t[% END %] term_char = '\0', [% WRAPPER "code-type.tt" %]int64_t[% END %] max_length = -1)
+[%- END %]
+
+<p>
+The <code>ReadString()</code> function reads a variable-length string from the document and returns it.
+</p>
+
+<p>
+The function will read from the given offset until it reaches a terminator (defined by term_char) or has read max_length bytes. If max_length is negative, only a string terminator will end the string. If the end of the file is reached before either of these conditions is met, a template error will be raised.
+</p>
+
+<hr>
+[% WRAPPER "code.tt" -%]
+[% WRAPPER "code-type.tt" %]int64_t[% END %] OffsetOf([% WRAPPER "code-type.tt" %]any_variable_type[% END %] variable)
+[%- END %]
+
+<p>
+The <code>OffsetOf()</code> function returns the offset of the given variable in the file. Attempting to use this function with a local (non-file) variable will raise a template error.
+</p>
+
+<hr>
+[% WRAPPER "code.tt" -%]
 [% WRAPPER "code-type.tt" %]void[% END %] Printf(string format, ...)
 [%- END %]
 
 <p>
 Writes a message to the application console. The message will also be shown in the output window if the template encounters an error.
+</p>
+
+<hr>
+[% WRAPPER "code.tt" -%]
+[% WRAPPER "code-type.tt" %]string[% END %] SPrintf([% WRAPPER "code-type.tt" %]string[% END %] format, ...)
+[%- END %]
+
+<p>
+Creates a string from a printf-style format and parameters.
 </p>
 
 <hr>
@@ -159,6 +192,71 @@ This function can be called to incrementally increase the size of an array being
 
 <p>
 Equivalent to <code>ArrayResize(array, ArrayLength(array) + num_elements)</code>.
+</p>
+
+<hr>
+[% WRAPPER "code.tt" -%]
+[% WRAPPER "code-type.tt" %]void[% END %] ArrayPush([% WRAPPER "code-type.tt" %]any_array_type[% END %] array, [% WRAPPER "code-type.tt" %]array_value_type[% END %] value)
+[%- END %]
+
+<p>
+Adds an element to the end of an array. The value type must be correct for the array and this function can only be used on <i>local</i> variables.
+</p>
+
+<hr>
+[% WRAPPER "code.tt" -%]
+[% WRAPPER "code-type.tt" %]array_value_type[% END %] ArrayPop([% WRAPPER "code-type.tt" %]any_array_type[% END %] array)
+[%- END %]
+
+<p>
+Removes and returns the last element from the array. This function can only be used on <i>local</i> variables, calling it on an empty array will raise a template error.
+</p>
+
+<hr>
+[% WRAPPER "code.tt" -%]
+[% WRAPPER "code-type.tt" %]const int64_t[% END %] ArrayIndex
+[%- END %]
+
+<p>
+Global variable that returns the current array index when expanding arrays of structs. For example, the following template would process a file containing a number of records, then the sizes of all those records, then the records themselves:
+</p>
+
+[% WRAPPER "code.tt" -%]
+[% WRAPPER "code-type.tt" %]uint32_t[% END %] num_records;
+[% WRAPPER "code-type.tt" %]uint32_t[% END %] record_sizes[num_records];
+
+[% WRAPPER "code-keyword.tt" %]struct[% END %] Record
+{
+	[% WRAPPER "code-type.tt" %]unsigned char[% END %] data[ record_sizes[ArrayIndex] ];
+};
+
+[% WRAPPER "code-keyword.tt" %]struct[% END %] Record records[num_records];
+[%- END %]
+
+<p>
+Attempting to access the <code>ArrayIndex</code> variable when not in a struct that is being used as an array element will abort the template execution with an error.
+</p>
+
+<a name="stringfunc"><h3>String Functions</h3></a>
+
+<hr>
+[% WRAPPER "code.tt" -%]
+[% WRAPPER "code-type.tt" %]int64_t[% END %] StringLengthBytes([% WRAPPER "code-type.tt" %]string[% END %] s)
+[%- END %]
+
+<p>
+Returns the number of <b>bytes</b> in the string.
+</p>
+
+<a name="metafunc"><h3>Metadata Functions</h3></a>
+
+<hr>
+[% WRAPPER "code.tt" -%]
+[% WRAPPER "code-type.tt" %]void[% END %] SetComment([% WRAPPER "code-type.tt" %]int64_t[% END %] offset, [% WRAPPER "code-type.tt" %]int64_t[% END %] length, [% WRAPPER "code-type.tt" %]string[% END %] text)
+[%- END %]
+
+<p>
+Sets a comment on a range of bytes in the document.
 </p>
 
 [% END %]

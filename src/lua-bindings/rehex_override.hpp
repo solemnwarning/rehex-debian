@@ -112,7 +112,7 @@ static int LUACALL wxLua_REHex_Document_get_comments(lua_State *L)
 {
 	REHex::Document *self = (REHex::Document*)(wxluaT_getuserdatatype(L, 1, wxluatype_REHex_Document));
 	
-	const REHex::NestedOffsetLengthMap<REHex::Document::Comment> comments = self->get_comments();
+	const REHex::ByteRangeTree<REHex::Document::Comment> &comments = self->get_comments();
 	
 	lua_newtable(L);            /* Table to return */
 	lua_Integer table_idx = 1;  /* Next index to use in return table */
@@ -204,5 +204,37 @@ static int LUACALL wxLua_REHex_Tab_get_selection_linear(lua_State *L)
 	else{
 		return 0;
 	}
+}
+%end
+
+%override wxLua_REHex_CharacterEncoding_encoding_by_key
+static int LUACALL wxLua_REHex_CharacterEncoding_encoding_by_key(lua_State *L)
+{
+	const wxString key = wxlua_getwxStringtype(L, 1);
+	
+	const REHex::CharacterEncoding* returns = REHex::CharacterEncoding::encoding_by_key(std::string(key));
+	wxluaT_pushuserdatatype(L, returns, wxluatype_REHex_CharacterEncoding);
+	
+	return 1;
+}
+%end
+
+%override wxLua_REHex_CharacterEncoding_all_encodings
+static int LUACALL wxLua_REHex_CharacterEncoding_all_encodings(lua_State *L)
+{
+	auto all_encodings = REHex::CharacterEncoding::all_encodings();
+	
+	lua_newtable(L);            /* Table to return */
+	lua_Integer table_idx = 1;  /* Next index to use in return table */
+	
+	for(auto e = all_encodings.begin(); e != all_encodings.end(); ++e)
+	{
+		lua_pushinteger(L, table_idx++);
+		wxluaT_pushuserdatatype(L, *e, wxluatype_REHex_CharacterEncoding);
+		
+		lua_settable(L, -3);
+	}
+	
+	return 1;
 }
 %end
