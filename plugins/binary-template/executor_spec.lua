@@ -1,5 +1,5 @@
 -- Binary Template plugin for REHex
--- Copyright (C) 2021-2022 Daniel Collins <solemnwarning@solemnwarning.net>
+-- Copyright (C) 2021-2023 Daniel Collins <solemnwarning@solemnwarning.net>
 --
 -- This program is free software; you can redistribute it and/or modify it
 -- under the terms of the GNU General Public License version 2 as published by
@@ -49,6 +49,14 @@ local function test_interface(data)
 		
 		file_length = function()
 			return data:len()
+		end,
+		
+		get_valid_charsets = function()
+			return {
+				"ASCII",
+				"ISO-8859-1",
+				"ISO-8859-2",
+			}
 		end,
 	}
 	
@@ -1012,6 +1020,26 @@ describe("executor", function()
 					{ "test.bt", 1, "struct", "mystruct", {},
 					{
 						{ "test.bt", 1, "variable", "int", "x", nil, nil },
+						{ "test.bt", 1, "variable", "int", "x", nil, nil },
+					} },
+					
+					{ "test.bt", 1, "variable", "struct mystruct", "a", nil, nil },
+					{ "test.bt", 1, "variable", "struct mystruct", "b", nil, nil },
+				})
+			end, "Attempt to redefine variable 'x' at test.bt:1")
+			
+		assert.has_error(
+			function()
+				executor.execute(interface, {
+					{ "test.bt", 1, "call", "LittleEndian", {} },
+					
+					{ "test.bt", 1, "struct", "mystruct", {},
+					{
+						{ "test.bt", 1, "if",
+							{ { "test.bt", 1, "num", 1 }, {
+								{ "test.bt", 1, "variable", "int", "x", nil, nil },
+							} } },
+						
 						{ "test.bt", 1, "variable", "int", "x", nil, nil },
 					} },
 					
@@ -3130,7 +3158,7 @@ describe("executor", function()
 					{ "FOO" },
 				}, nil },
 			})
-			end, "Attempt to redefine name 'FOO' at test.bt:1")
+			end, "Attempt to redefine variable 'FOO' at test.bt:1")
 	end)
 	
 	it("errors when reusing an existing variable name as an enum member", function()
@@ -3144,7 +3172,7 @@ describe("executor", function()
 					{ "FOO" },
 				}, nil },
 			})
-			end, "Attempt to redefine name 'FOO' at test.bt:2")
+			end, "Attempt to redefine variable 'FOO' at test.bt:2")
 	end)
 	
 	it("errors when redefining an enum type", function()
@@ -3157,7 +3185,7 @@ describe("executor", function()
 				}, nil },
 				
 				{ "test.bt", 2, "enum", "int", "myenum", {
-					{ "FOO" },
+					{ "BAZ" },
 				}, nil },
 			})
 			end, "Attempt to redefine type 'enum myenum' at test.bt:2")
@@ -6656,5 +6684,817 @@ describe("executor", function()
 				{ "test.bt", 3, "variable", "struct mystruct", "a", nil, nil },
 			})
 			end, "Cannot use type 'string' to declare a file variable at test.bt:2")
+	end)
+	
+	it("exposes ArrayIndex variable in struct array elements", function()
+		local interface, log = test_interface(string.char(
+			0x00, 0x00, 0x00, 0x00,
+			0x00, 0x00, 0x00, 0x00,
+			0x00, 0x00, 0x00, 0x00,
+			0x00, 0x00, 0x00, 0x00,
+			0x00, 0x00, 0x00, 0x00
+		))
+		
+		executor.execute(interface, {
+			{ "test.bt", 1, "struct", "B", {},
+			{
+				{ "test.bt", 2, "call", "Printf", {
+					{ "test.bt", 2, "str", "B ArrayIndex = %d" },
+					{ "test.bt", 2, "ref", { "ArrayIndex" } } } },
+				
+				{ "test.bt", 3, "variable", "char", "x", nil, nil },
+			} },
+			
+			{ "test.bt", 5, "struct", "A", {},
+			{
+				{ "test.bt", 6, "call", "Printf", {
+					{ "test.bt", 6, "str", "A ArrayIndex = %d" },
+					{ "test.bt", 6, "ref", { "ArrayIndex" } } } },
+				
+				{ "test.bt", 7, "variable", "struct B", "b", nil, { "test.bt", 1, "num", 3 } },
+			} },
+			
+			{ "test.bt", 9, "variable", "struct A", "a", nil, { "test.bt", 1, "num", 2 } },
+		})
+		
+		local expect_log = {
+			"print(A ArrayIndex = 0)",
+			"print(B ArrayIndex = 0)",
+			"print(B ArrayIndex = 1)",
+			"print(B ArrayIndex = 2)",
+			"print(A ArrayIndex = 1)",
+			"print(B ArrayIndex = 0)",
+			"print(B ArrayIndex = 1)",
+			"print(B ArrayIndex = 2)",
+			
+			"set_comment(0, 1, x)",
+			"set_comment(0, 1, b[0])",
+			"set_comment(1, 1, x)",
+			"set_comment(1, 1, b[1])",
+			"set_comment(2, 1, x)",
+			"set_comment(2, 1, b[2])",
+			"set_comment(0, 3, a[0])",
+			"set_comment(3, 1, x)",
+			"set_comment(3, 1, b[0])",
+			"set_comment(4, 1, x)",
+			"set_comment(4, 1, b[1])",
+			"set_comment(5, 1, x)",
+			"set_comment(5, 1, b[2])",
+			"set_comment(3, 3, a[1])",
+			"set_data_type(0, 1, s8)",
+			"set_data_type(1, 1, s8)",
+			"set_data_type(2, 1, s8)",
+			"set_data_type(3, 1, s8)",
+			"set_data_type(4, 1, s8)",
+			"set_data_type(5, 1, s8)",
+		}
+		
+		assert.are.same(expect_log, log)
+	end)
+	
+	it("errors when modifying ArrayIndex variable", function()
+		local interface, log = test_interface()
+		
+		assert.has_error(function()
+			executor.execute(interface, {
+				{ "test.bt", 1, "struct", "A", {},
+				{
+					{ "test.bt", 2, "assign",
+						{ "test.bt", 2, "ref", { "ArrayIndex" } },
+						{ "test.bt", 2, "num", 5678 } },
+				} },
+				
+				{ "test.bt", 9, "variable", "struct A", "a", nil, { "test.bt", 1, "num", 2 } },
+			})
+			end, "Attempt to write to ArrayIndex variable at test.bt:2")
+	end)
+	
+	it("errors on use of ArrayIndex in non-array-element struct", function()
+		local interface, log = test_interface()
+		
+		assert.has_error(function()
+			executor.execute(interface, {
+				{ "test.bt", 1, "struct", "B", {},
+				{
+					{ "test.bt", 2, "call", "Printf", {
+						{ "test.bt", 2, "str", "B ArrayIndex = %d" },
+						{ "test.bt", 2, "ref", { "ArrayIndex" } } } },
+					
+					{ "test.bt", 3, "variable", "char", "x", nil, nil },
+				} },
+				
+				{ "test.bt", 5, "struct", "A", {},
+				{
+					{ "test.bt", 6, "call", "Printf", {
+						{ "test.bt", 6, "str", "A ArrayIndex = %d" },
+						{ "test.bt", 6, "ref", { "ArrayIndex" } } } },
+					
+					{ "test.bt", 7, "variable", "struct B", "b", nil, nil },
+				} },
+				
+				{ "test.bt", 9, "variable", "struct A", "a", nil, { "test.bt", 1, "num", 2 } },
+			})
+			end, "Attempt to read ArrayIndex variable outside of an array element at test.bt:2")
+	end)
+	
+	it("allows use of global defined before a function inside the function", function()
+		local interface, log = test_interface(string.char(
+			0xD2, 0x04, 0x00, 0x00,
+			0x00, 0x00, 0x00, 0x00,
+			0x00, 0x00, 0x00, 0x00,
+			0x00, 0x00, 0x00, 0x00,
+			0x00, 0x00, 0x00, 0x00
+		))
+		
+		executor.execute(interface, {
+			{ "test.bt", 1, "variable", "int", "filevar", nil, nil },
+			{ "test.bt", 2, "local-variable", "int", "localvar", nil, nil, { "test.bt", 2, "num", 5678 } },
+			
+			{ "test.bt", 4, "function", "void", "foo", {}, {
+				{ "test.bt", 5, "call", "Printf", { { "test.bt", 5, "str", "filevar = %d" }, { "test.bt", 5, "ref", { "filevar" } } } },
+				{ "test.bt", 6, "call", "Printf", { { "test.bt", 6, "str", "localvar = %d" }, { "test.bt", 6, "ref", { "localvar" } } } },
+				} },
+			
+			{ "test.bt", 8, "call", "foo", {} },
+		})
+		
+		local expect_log = {
+			"print(filevar = 1234)",
+			"print(localvar = 5678)",
+			
+			"set_comment(0, 4, filevar)",
+			"set_data_type(0, 4, s32le)",
+		}
+		
+		assert.are.same(expect_log, log)
+	end)
+	
+	it("errors on use of global defined after a function inside the function", function()
+		local interface, log = test_interface(string.char(
+			0xD2, 0x04, 0x00, 0x00,
+			0x00, 0x00, 0x00, 0x00,
+			0x00, 0x00, 0x00, 0x00,
+			0x00, 0x00, 0x00, 0x00,
+			0x00, 0x00, 0x00, 0x00
+		))
+		
+		assert.has_error(function()
+			executor.execute(interface, {
+				{ "test.bt", 1, "function", "void", "foo", {}, {
+					{ "test.bt", 2, "call", "Printf", { { "test.bt", 2, "str", "filevar = %d" }, { "test.bt", 2, "ref", { "filevar" } } } } } },
+				
+				{ "test.bt", 4, "variable", "int", "filevar", nil, nil },
+				{ "test.bt", 5, "local-variable", "int", "localvar", nil, nil, { "test.bt", 5, "num", 5678 } },
+				
+				{ "test.bt", 7, "call", "foo", {} },
+			})
+			end, "Attempt to use undefined variable 'filevar' at test.bt:2")
+		
+		assert.has_error(function()
+			executor.execute(interface, {
+				{ "test.bt", 1, "function", "void", "foo", {}, {
+					{ "test.bt", 2, "call", "Printf", { { "test.bt", 2, "str", "localvar = %d" }, { "test.bt", 2, "ref", { "localvar" } } } } } },
+				
+				{ "test.bt", 4, "variable", "int", "filevar", nil, nil },
+				{ "test.bt", 5, "local-variable", "int", "localvar", nil, nil, { "test.bt", 5, "num", 5678 } },
+				
+				{ "test.bt", 7, "call", "foo", {} },
+			})
+			end, "Attempt to use undefined variable 'localvar' at test.bt:2")
+	end)
+	
+	it("allows setting character set on a char array", function()
+		local interface, log = test_interface(string.char(
+			0xD2, 0x04, 0x00, 0x00,
+			0x00, 0x00, 0x00, 0x00,
+			0x00, 0x00, 0x00, 0x00,
+			0x00, 0x00, 0x00, 0x00,
+			0x00, 0x00, 0x00, 0x00
+		))
+		
+		executor.execute(interface, {
+			{ "test.bt", 1, "variable", "char", "s", nil,
+				-- array length
+				{ "test.bt", 1, "num", 8 },
+				
+				-- attributes
+				{
+					{ "test.bt", 1, "charset", { "test.bt", 1, "str", "ASCII" } },
+				} },
+			
+			{ "test.bt", 2, "function", "string", "charsetfunc", {},
+			{
+				{ "test.bt", 2, "return",
+					{ "test.bt", 2, "str", "ISO-8859-1" } },
+			} },
+			
+			{ "test.bt", 3, "variable", "char", "t", nil,
+				-- array length
+				{ "test.bt", 3, "num", 8 },
+				
+				-- attributes
+				{
+					{ "test.bt", 3, "charset", { "test.bt", 3, "call", "charsetfunc", {} } },
+				} },
+		})
+		
+		local expect_log = {
+			"set_comment(0, 8, s)",
+			"set_data_type(0, 8, text:ASCII)",
+			"set_comment(8, 8, t)",
+			"set_data_type(8, 8, text:ISO-8859-1)",
+		}
+		
+		assert.are.same(expect_log, log)
+	end)
+	
+	it("doesn't allow setting character set on non-char[] types", function()
+		local interface, log = test_interface(string.char(
+			0xD2, 0x04, 0x00, 0x00,
+			0x00, 0x00, 0x00, 0x00,
+			0x00, 0x00, 0x00, 0x00,
+			0x00, 0x00, 0x00, 0x00,
+			0x00, 0x00, 0x00, 0x00
+		))
+		
+		assert.has_error(function()
+			executor.execute(interface, {
+				{ "test.bt", 1, "variable", "char", "s", nil, nil,
+				
+				-- attributes
+				{
+					{ "test.bt", 1, "charset", { "test.bt", 1, "str", "ASCII" } },
+				} },
+			})
+			end, "Invalid variable attribute 'charset' used with type 'char' at test.bt:1")
+		
+		assert.has_error(function()
+			executor.execute(interface, {
+				{ "test.bt", 1, "variable", "unsigned char", "s", nil,
+				
+				-- array length
+				{ "test.bt", 1, "num", 8 },
+				
+				-- attributes
+				{
+					{ "test.bt", 1, "charset", { "test.bt", 1, "str", "ASCII" } },
+				} },
+			})
+			end, "Invalid variable attribute 'charset' used with type 'unsigned char[]' at test.bt:1")
+	end)
+	
+	it("doesn't allow specifying character set multiple times", function()
+		local interface, log = test_interface(string.char(
+			0xD2, 0x04, 0x00, 0x00,
+			0x00, 0x00, 0x00, 0x00,
+			0x00, 0x00, 0x00, 0x00,
+			0x00, 0x00, 0x00, 0x00,
+			0x00, 0x00, 0x00, 0x00
+		))
+		
+		assert.has_error(function()
+			executor.execute(interface, {
+				{ "test.bt", 1, "variable", "char", "s", nil,
+				
+				-- array length
+				{ "test.bt", 1, "num", 8 },
+				
+				-- attributes
+				{
+					{ "test.bt", 1, "charset", { "test.bt", 1, "str", "ASCII" } },
+					{ "test.bt", 1, "charset", { "test.bt", 1, "str", "ASCII" } },
+				} },
+			})
+			end, "Attribute 'charset' specified multiple times at test.bt:1")
+	end)
+	
+	it("doesn't allow specifying character set as non-string types", function()
+		local interface, log = test_interface(string.char(
+			0xD2, 0x04, 0x00, 0x00,
+			0x00, 0x00, 0x00, 0x00,
+			0x00, 0x00, 0x00, 0x00,
+			0x00, 0x00, 0x00, 0x00,
+			0x00, 0x00, 0x00, 0x00
+		))
+		
+		assert.has_error(function()
+			executor.execute(interface, {
+				{ "test.bt", 1, "variable", "char", "s", nil,
+				
+				-- array length
+				{ "test.bt", 1, "num", 8 },
+				
+				-- attributes
+				{
+					{ "test.bt", 1, "charset", { "test.bt", 1, "num", 1 } },
+				} },
+			})
+			end, "Unexpected type 'const int' used as value for 'charset' attribute (expected string) at test.bt:1")
+		
+		assert.has_error(function()
+			executor.execute(interface, {
+				{ "test.bt", 1, "variable", "char", "s", nil,
+				
+				-- array length
+				{ "test.bt", 1, "num", 8 },
+				
+				-- attributes
+				{
+					{ "test.bt", 1, "charset" }, -- void / no value
+				} },
+			})
+			end, "Unexpected type 'void' used as value for 'charset' attribute (expected string) at test.bt:1")
+	end)
+	
+	it("doesn't allow specifying an unknown character set", function()
+		local interface, log = test_interface(string.char(
+			0xD2, 0x04, 0x00, 0x00,
+			0x00, 0x00, 0x00, 0x00,
+			0x00, 0x00, 0x00, 0x00,
+			0x00, 0x00, 0x00, 0x00,
+			0x00, 0x00, 0x00, 0x00
+		))
+		
+		assert.has_error(function()
+			executor.execute(interface, {
+				{ "test.bt", 1, "variable", "char", "s", nil,
+				
+				-- array length
+				{ "test.bt", 1, "num", 8 },
+				
+				-- attributes
+				{
+					{ "test.bt", 1, "charset", { "test.bt", 1, "str", "UTF-64" } },
+				} },
+			})
+			end, "Unrecognised character set 'UTF-64' specified at test.bt:1")
+	end)
+	
+	describe("ReadString", function()
+		it("reads a nil-terminated string", function()
+			local interface, log = test_interface(string.char(
+				0x00, 0x41, 0x42, 0x43,
+				0x00, 0x00, 0x00, 0x00
+			))
+			
+			executor.execute(interface, {
+				-- Printf("%s", ReadString(1));
+				{ "test.bt", 1, "call", "Printf", {
+					{ "test.bt", 1, "str", "%s" },
+					{ "test.bt", 1, "call", "ReadString", {
+						{ "test.bt", 1, "num", 1 } } } } },
+				
+				-- Printf("%s", ReadString(2));
+				{ "test.bt", 2, "call", "Printf", {
+					{ "test.bt", 2, "str", "%s" },
+					{ "test.bt", 2, "call", "ReadString", {
+						{ "test.bt", 2, "num", 2 } } } } },
+				
+				-- Printf("%s", ReadString(4));
+				{ "test.bt", 3, "call", "Printf", {
+					{ "test.bt", 3, "str", "%s" },
+					{ "test.bt", 3, "call", "ReadString", {
+						{ "test.bt", 3, "num", 4 } } } } },
+			})
+			
+			local expect_log = {
+				"print(ABC)",
+				"print(BC)",
+				"print()",
+			}
+			
+			assert.are.same(expect_log, log)
+		end)
+		
+		it("reads a space-terminated string", function()
+			local interface, log = test_interface(string.char(
+				0x00, 0x41, 0x42, 0x43,
+				0x20, 0x00, 0x00, 0x00
+			))
+			
+			executor.execute(interface, {
+				-- Printf("%s", ReadString(1, ' '));
+				{ "test.bt", 1, "call", "Printf", {
+					{ "test.bt", 1, "str", "%s" },
+					{ "test.bt", 1, "call", "ReadString", {
+						{ "test.bt", 1, "num", 1 },
+						{ "test.bt", 1, "num", 0x20 } } } } },
+				
+				-- Printf("%s", ReadString(2, ' '));
+				{ "test.bt", 2, "call", "Printf", {
+					{ "test.bt", 2, "str", "%s" },
+					{ "test.bt", 2, "call", "ReadString", {
+						{ "test.bt", 2, "num", 2 },
+						{ "test.bt", 2, "num", 0x20 } } } } },
+				
+				-- Printf("%s", ReadString(4, ' '));
+				{ "test.bt", 3, "call", "Printf", {
+					{ "test.bt", 3, "str", "%s" },
+					{ "test.bt", 3, "call", "ReadString", {
+						{ "test.bt", 3, "num", 4 },
+						{ "test.bt", 3, "num", 0x20 } } } } },
+			})
+			
+			local expect_log = {
+				"print(ABC)",
+				"print(BC)",
+				"print()",
+			}
+			
+			assert.are.same(expect_log, log)
+		end)
+		
+		it("reads a truncated string", function()
+			local interface, log = test_interface(string.char(
+				0x00, 0x41, 0x42, 0x43,
+				0x44, 0x45, 0x46, 0x47
+			))
+			
+			executor.execute(interface, {
+				-- Printf("%s", ReadString(1, '\0', 3));
+				{ "test.bt", 1, "call", "Printf", {
+					{ "test.bt", 1, "str", "%s" },
+					{ "test.bt", 1, "call", "ReadString", {
+						{ "test.bt", 1, "num", 1 },
+						{ "test.bt", 1, "num", 0x00 },
+						{ "test.bt", 1, "num", 3 } } } } },
+				
+				-- Printf("%s", ReadString(1, '\0', 7));
+				{ "test.bt", 2, "call", "Printf", {
+					{ "test.bt", 2, "str", "%s" },
+					{ "test.bt", 2, "call", "ReadString", {
+						{ "test.bt", 2, "num", 1 },
+						{ "test.bt", 2, "num", 0x00 },
+						{ "test.bt", 2, "num", 7 } } } } },
+			})
+			
+			local expect_log = {
+				"print(ABC)",
+				"print(ABCDEFG)",
+			}
+			
+			assert.are.same(expect_log, log)
+		end)
+		
+		it("raises an error on overflow", function()
+			local interface, log = test_interface(string.char(
+				0x00, 0x41, 0x42, 0x43,
+				0x44, 0x45, 0x46, 0x47
+			))
+			
+			assert.has_error(function()
+				executor.execute(interface, {
+					-- Printf("%s", ReadString(1));
+					{ "test.bt", 1, "call", "Printf", {
+						{ "test.bt", 1, "str", "%s" },
+						{ "test.bt", 1, "call", "ReadString", {
+							{ "test.bt", 1, "num", 1 } } } } },
+				})
+				end, "Attempt to read past end of file in ReadString function at test.bt:1")
+		end)
+	end)
+	
+	it("doesn't annotate private variables", function()
+		local interface, log = test_interface(string.char(
+			0x01, 0x00, 0x00, 0x00,
+			0x02, 0x00, 0x00, 0x00,
+			0x03, 0x00, 0x00, 0x00,
+			0x02, 0x00, 0x00, 0x00,
+			0x03, 0x00, 0x00, 0x00,
+			0x04, 0x00, 0x00, 0x00
+		))
+		
+		executor.execute(interface, {
+			{ "test.bt", 1, "call", "LittleEndian", {} },
+			
+			{ "test.bt", 1, "struct", "mystruct", {},
+			{
+				{ "test.bt", 1, "variable", "int", "x", nil, nil },
+				{ "test.bt", 1, "variable", "int", "y", nil, nil },
+				{ "test.bt", 1, "variable", "int", "z", nil, nil },
+			} },
+			
+			{ "test.bt", 1, "variable", "struct mystruct", "a", nil, nil, private = true },
+			{ "test.bt", 1, "variable", "struct mystruct", "b", nil, nil },
+		})
+		
+		local expect_log = {
+			"set_comment(12, 4, x)",
+			"set_comment(16, 4, y)",
+			"set_comment(20, 4, z)",
+			"set_comment(12, 12, b)",
+			"set_data_type(12, 4, s32le)",
+			"set_data_type(16, 4, s32le)",
+			"set_data_type(20, 4, s32le)",
+		}
+		
+		assert.are.same(expect_log, log)
+	end)
+	
+	it("doesn't annotate private struct members", function()
+		local interface, log = test_interface(string.char(
+			0x01, 0x00, 0x00, 0x00,
+			0x02, 0x00, 0x00, 0x00,
+			0x03, 0x00, 0x00, 0x00,
+			0x02, 0x00, 0x00, 0x00,
+			0x03, 0x00, 0x00, 0x00,
+			0x04, 0x00, 0x00, 0x00
+		))
+		
+		executor.execute(interface, {
+			{ "test.bt", 1, "call", "LittleEndian", {} },
+			
+			{ "test.bt", 1, "struct", "mystruct", {},
+			{
+				{ "test.bt", 1, "variable", "int", "x", nil, nil },
+				{ "test.bt", 1, "variable", "int", "y", nil, nil, private = true },
+				{ "test.bt", 1, "variable", "int", "z", nil, nil },
+			} },
+			
+			{ "test.bt", 1, "variable", "struct mystruct", "a", nil, nil },
+			{ "test.bt", 1, "variable", "struct mystruct", "b", nil, nil },
+		})
+		
+		local expect_log = {
+			"set_comment(0, 4, x)",
+			"set_comment(8, 4, z)",
+			"set_comment(0, 12, a)",
+			"set_data_type(0, 4, s32le)",
+			"set_data_type(8, 4, s32le)",
+			
+			"set_comment(12, 4, x)",
+			"set_comment(20, 4, z)",
+			"set_comment(12, 12, b)",
+			"set_data_type(12, 4, s32le)",
+			"set_data_type(20, 4, s32le)",
+		}
+		
+		assert.are.same(expect_log, log)
+	end)
+	
+	it("doesn't annotate private struct members", function()
+		local interface, log = test_interface(string.char(
+			0x01, 0x00, 0x00, 0x00,
+			0x02, 0x00, 0x00, 0x00,
+			0x03, 0x00, 0x00, 0x00,
+			0x02, 0x00, 0x00, 0x00,
+			0x03, 0x00, 0x00, 0x00,
+			0x04, 0x00, 0x00, 0x00
+		))
+		
+		executor.execute(interface, {
+			-- int foo() {
+			{ "test.bt", 1, "function", "int", "foo", {}, {
+				-- private int a;
+				{ "test.bt", 2, "variable", "int", "a", nil, nil, private = true },
+				
+				-- private int b;
+				{ "test.bt", 3, "variable", "int", "b", nil, nil, private = true },
+				
+				-- Printf("a = %d, b = %d", a, b);
+				{ "test.bt", 4, "call", "Printf", {
+					{ "test.bt", 4, "str", "a = %d, b = %d" },
+					{ "test.bt", 4, "ref", { "a" } },
+					{ "test.bt", 4, "ref", { "b" } } } },
+				
+				-- return b;
+				{ "test.bt", 5, "return",
+					{ "test.bt", 5, "ref", { "b" } } },
+			} },
+			
+			-- local var c = foo();
+			{ "test.bt", 7, "local-variable", "int", "c", nil, nil, { "test.bt", 7, "call", "foo", {} } },
+			
+			-- Printf("c = %d", c);
+			{ "test.bt", 8, "call", "Printf", {
+				{ "test.bt", 8, "str", "c = %d" },
+				{ "test.bt", 8, "ref", { "c" } } } },
+		})
+		
+		local expect_log = {
+			"print(a = 1, b = 2)",
+			"print(c = 2)",
+		}
+		
+		assert.are.same(expect_log, log)
+	end)
+	
+	it("allows formatting strings with embedded format tokens", function()
+		local interface, log = test_interface()
+		
+		executor.execute(interface, {
+			-- local string s = SPrintf("Hello %s", "foo %s bar %d");
+			{ "test.bt", 1, "local-variable", "string", "s", nil, nil,
+				{ "test.bt", 1, "call", "SPrintf", {
+					{ "test.bt", 1, "str", "Hello %s" },
+					{ "test.bt", 1, "str", "foo %s bar %d" } } } },
+			
+			-- Printf("%s", s);
+			{ "test.bt", 2, "call", "Printf", { { "test.bt", 2, "str", "%s" }, { "test.bt", 2, "ref", { "s" } } } },
+		})
+		
+		local expect_log = {
+			"print(Hello foo %s bar %d)",
+		}
+		
+		assert.are.same(expect_log, log)
+	end)
+	
+	it("allows appending to local arrays with ArrayPush()", function()
+		local interface, log = test_interface()
+		
+		executor.execute(interface, {
+			-- local string s[4];
+			{ "test.bt", 1, "local-variable", "string", "s", nil, { "test.bt", 1, "num", 4 }, nil },
+			
+			-- s[0] = "foo"
+			{ "test.bt", 2, "assign",
+				{ "test.bt", 2, "ref", { "s", { "test.bt", 2, "num", 0 } } },
+				{ "test.bt", 2, "str", "foo" } },
+			
+			-- s[1] = "bar"
+			{ "test.bt", 3, "assign",
+				{ "test.bt", 3, "ref", { "s", { "test.bt", 3, "num", 1 } } },
+				{ "test.bt", 3, "str", "bar" } },
+			
+			-- ArrayPush(s, "baz");
+			{ "test.bt", 4, "call", "ArrayPush", { { "test.bt", 4, "ref", { "s" } }, { "test.bt", 4, "str", "baz" } } },
+			
+			-- ArrayPush(s, "qux");
+			{ "test.bt", 5, "call", "ArrayPush", { { "test.bt", 5, "ref", { "s" } }, { "test.bt", 5, "str", "qux" } } },
+			
+			-- Printf("s[0] = %s", s[0]);
+			-- Printf("s[1] = %s", s[1]);
+			-- ...
+			{ "test.bt", 6, "call", "Printf", { { "test.bt", 6, "str", "s[0] = %s" }, { "test.bt", 6, "ref", { "s", { "test.bt", 6, "num", 0 } } } } },
+			{ "test.bt", 6, "call", "Printf", { { "test.bt", 6, "str", "s[1] = %s" }, { "test.bt", 6, "ref", { "s", { "test.bt", 6, "num", 1 } } } } },
+			{ "test.bt", 6, "call", "Printf", { { "test.bt", 6, "str", "s[2] = %s" }, { "test.bt", 6, "ref", { "s", { "test.bt", 6, "num", 2 } } } } },
+			{ "test.bt", 6, "call", "Printf", { { "test.bt", 6, "str", "s[3] = %s" }, { "test.bt", 6, "ref", { "s", { "test.bt", 6, "num", 3 } } } } },
+			{ "test.bt", 6, "call", "Printf", { { "test.bt", 6, "str", "s[4] = %s" }, { "test.bt", 6, "ref", { "s", { "test.bt", 6, "num", 4 } } } } },
+			{ "test.bt", 6, "call", "Printf", { { "test.bt", 6, "str", "s[5] = %s" }, { "test.bt", 6, "ref", { "s", { "test.bt", 6, "num", 5 } } } } },
+		})
+		
+		local expect_log = {
+			"print(s[0] = foo)",
+			"print(s[1] = bar)",
+			"print(s[2] = )",
+			"print(s[3] = )",
+			"print(s[4] = baz)",
+			"print(s[5] = qux)",
+		}
+		
+		assert.are.same(expect_log, log)
+	end)
+	
+	it("errors when ArrayPush() is called with incompatible element type", function()
+		local interface, log = test_interface()
+		
+		assert.has_error(function()
+			executor.execute(interface, {
+				-- local string s[4];
+				{ "test.bt", 1, "local-variable", "string", "s", nil, { "test.bt", 1, "num", 4 }, nil },
+				
+				-- ArrayPush(s, 1);
+				{ "test.bt", 2, "call", "ArrayPush", { { "test.bt", 2, "ref", { "s" } }, { "test.bt", 2, "num", 1 } } },
+			})
+			end, "Attempt to push incompatible value type 'const int' into array type 'string[]' at test.bt:2")
+	end)
+	
+	it("errors when ArrayPush() is called on file variable", function()
+		local interface, log = test_interface()
+		
+		assert.has_error(function()
+			executor.execute(interface, {
+				-- int s[0];
+				{ "test.bt", 1, "variable", "int", "s", nil, { "test.bt", 1, "num", 0 }, nil },
+				
+				-- ArrayPush(s, 1);
+				{ "test.bt", 2, "call", "ArrayPush", { { "test.bt", 2, "ref", { "s" } }, { "test.bt", 2, "num", 1 } } },
+			})
+			end, "Attempt to modify non-local array at test.bt:2")
+	end)
+	
+	it("allows removing elements from local arrays ArrayPop()", function()
+		local interface, log = test_interface()
+		
+		executor.execute(interface, {
+			-- local string s[4];
+			{ "test.bt", 1, "local-variable", "string", "s", nil, { "test.bt", 1, "num", 2 }, nil },
+			
+			-- s[0] = "foo"
+			{ "test.bt", 2, "assign",
+				{ "test.bt", 2, "ref", { "s", { "test.bt", 2, "num", 0 } } },
+				{ "test.bt", 2, "str", "foo" } },
+			
+			-- s[1] = "bar"
+			{ "test.bt", 3, "assign",
+				{ "test.bt", 3, "ref", { "s", { "test.bt", 3, "num", 1 } } },
+				{ "test.bt", 3, "str", "bar" } },
+			
+			-- Printf("ArrayPop(s) = %s", ArrayPop(s)); (x2)
+			{ "test.bt", 4, "call", "Printf", { { "test.bt", 4, "str", "ArrayPop(s) = %s" }, { "test.bt", 4, "call", "ArrayPop", { { "test.bt", 4, "ref", { "s" } } } } } },
+			{ "test.bt", 4, "call", "Printf", { { "test.bt", 4, "str", "ArrayPop(s) = %s" }, { "test.bt", 4, "call", "ArrayPop", { { "test.bt", 4, "ref", { "s" } } } } } },
+			
+			-- Printf("ArrayLength(s) = %d", ArrayLength(s));
+			{ "test.bt", 5, "call", "Printf", { { "test.bt", 5, "str", "ArrayLength(s) = %d" }, { "test.bt", 5, "call", "ArrayLength", { { "test.bt", 5, "ref", { "s" } } } } } },
+		})
+		
+		local expect_log = {
+			"print(ArrayPop(s) = bar)",
+			"print(ArrayPop(s) = foo)",
+			"print(ArrayLength(s) = 0)",
+		}
+		
+		assert.are.same(expect_log, log)
+	end)
+	
+	it("errors when ArrayPop() is called on file variable", function()
+		local interface, log = test_interface()
+		
+		assert.has_error(function()
+			executor.execute(interface, {
+				-- int s[0];
+				{ "test.bt", 1, "variable", "int", "s", nil, { "test.bt", 1, "num", 0 }, nil },
+				
+				-- ArrayPop(s);
+				{ "test.bt", 2, "call", "ArrayPop", { { "test.bt", 2, "ref", { "s" } } } },
+			})
+			end, "Attempt to modify non-local array at test.bt:2")
+	end)
+	
+	it("errors when ArrayPop() is called on empty array", function()
+		local interface, log = test_interface()
+		
+		assert.has_error(function()
+			executor.execute(interface, {
+				-- local int s[0];
+				{ "test.bt", 1, "local-variable", "int", "s", nil, { "test.bt", 1, "num", 0 }, nil },
+				
+				-- ArrayPop(s);
+				{ "test.bt", 2, "call", "ArrayPop", { { "test.bt", 2, "ref", { "s" } } } },
+			})
+			end, "Attempt to pop value from empty array at test.bt:2")
+	end)
+	
+	it("allows getting the offset of a file variable using the OffsetOf() function", function()
+		local interface, log = test_interface(string.char(
+			0x01, 0x00, 0x00, 0x00,
+			0x02, 0x00, 0x00, 0x00,
+			0x03, 0x00, 0x00, 0x00,
+			0x02, 0x00, 0x00, 0x00
+		))
+		
+		executor.execute(interface, {
+			-- int a;
+			{ "test.bt", 1, "variable", "int", "a", nil, nil, nil },
+			
+			-- int b[2];
+			{ "test.bt", 2, "variable", "int", "b", nil, { "test.bt", 2, "num", 2 }, nil },
+			
+			-- Printf("OffsetOf(a) = %d", OffsetOf(a));
+			{ "test.bt", 3, "call", "Printf", { { "test.bt", 3, "str", "OffsetOf(a) = %d" }, { "test.bt", 3, "call", "OffsetOf", { { "test.bt", 3, "ref", { "a" } } } } } },
+			
+			-- Printf("OffsetOf(b) = %d", OffsetOf(b));
+			{ "test.bt", 4, "call", "Printf", { { "test.bt", 4, "str", "OffsetOf(b) = %d" }, { "test.bt", 4, "call", "OffsetOf", { { "test.bt", 4, "ref", { "b" } } } } } },
+			
+			-- Printf("OffsetOf(b[0]) = %d", OffsetOf(b[0]));
+			{ "test.bt", 5, "call", "Printf", { { "test.bt", 5, "str", "OffsetOf(b[0]) = %d" }, { "test.bt", 5, "call", "OffsetOf", { { "test.bt", 5, "ref", { "b", { "test.bt", 5, "num", 0 } } } } } } },
+			
+			-- Printf("OffsetOf(b[1]) = %d", OffsetOf(b[1]));
+			{ "test.bt", 6, "call", "Printf", { { "test.bt", 6, "str", "OffsetOf(b[1]) = %d" }, { "test.bt", 6, "call", "OffsetOf", { { "test.bt", 6, "ref", { "b", { "test.bt", 6, "num", 1 } } } } } } },
+		})
+		
+		local expect_log = {
+			"print(OffsetOf(a) = 0)",
+			"print(OffsetOf(b) = 4)",
+			"print(OffsetOf(b[0]) = 4)",
+			"print(OffsetOf(b[1]) = 8)",
+			
+			"set_comment(0, 4, a)",
+			"set_data_type(0, 4, s32le)",
+			"set_comment(4, 8, b)",
+			"set_data_type(4, 8, s32le)",
+		}
+		
+		assert.are.same(expect_log, log)
+	end)
+	
+	it("errors when OffsetOf() is called with a local variable", function()
+		local interface, log = test_interface(string.char(
+			0x01, 0x00, 0x00, 0x00,
+			0x02, 0x00, 0x00, 0x00,
+			0x03, 0x00, 0x00, 0x00,
+			0x02, 0x00, 0x00, 0x00
+		))
+		
+		assert.has_error(function()
+			executor.execute(interface, {
+				-- local int a;
+				{ "test.bt", 1, "local-variable", "int", "a", nil, nil, nil },
+				
+				-- Printf("OffsetOf(a) = %d", OffsetOf(a));
+				{ "test.bt", 2, "call", "Printf", { { "test.bt", 2, "str", "OffsetOf(a) = %d" }, { "test.bt", 2, "call", "OffsetOf", { { "test.bt", 2, "ref", { "a" } } } } } },
+			})
+			end, "Attempt to get file offset of a local variable at test.bt:2")
 	end)
 end)

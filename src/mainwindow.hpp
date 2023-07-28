@@ -1,5 +1,5 @@
 /* Reverse Engineer's Hex Editor
- * Copyright (C) 2017-2022 Daniel Collins <solemnwarning@solemnwarning.net>
+ * Copyright (C) 2017-2023 Daniel Collins <solemnwarning@solemnwarning.net>
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 as published by
@@ -18,12 +18,14 @@
 #ifndef REHEX_MAINWINDOW_HPP
 #define REHEX_MAINWINDOW_HPP
 
+#include <list>
 #include <map>
 #include <vector>
 #include <wx/aui/auibook.h>
 #include <wx/dnd.h>
 #include <wx/wx.h>
 
+#include "DetachableNotebook.hpp"
 #include "Events.hpp"
 #include "Tab.hpp"
 #include "ToolPanel.hpp"
@@ -72,7 +74,11 @@ namespace REHex {
 			*/
 			void switch_tab(DocumentCtrl *doc_ctrl);
 			
+			void insert_tab(Tab *tab, int position);
+			DetachableNotebook *get_notebook();
+			
 			void OnWindowClose(wxCloseEvent& event);
+			void OnWindowActivate(wxActivateEvent &event);
 			void OnCharHook(wxKeyEvent &event);
 			
 			void OnNew(wxCommandEvent &event);
@@ -80,6 +86,7 @@ namespace REHex {
 			void OnRecentOpen(wxCommandEvent &event);
 			void OnSave(wxCommandEvent &event);
 			void OnSaveAs(wxCommandEvent &event);
+			void OnReload(wxCommandEvent &event);
 			void OnImportHex(wxCommandEvent &event);
 			void OnExportHex(wxCommandEvent &event);
 			void OnClose(wxCommandEvent &event);
@@ -132,6 +139,7 @@ namespace REHex {
 			void OnDocumentClosed(wxAuiNotebookEvent &event);
 			void OnDocumentMenu(wxAuiNotebookEvent &event);
 			void OnDocumentMiddleMouse(wxAuiNotebookEvent& event);
+			void OnDocumentDetached(DetachedPageEvent &event);
 			
 			void OnCursorUpdate(CursorUpdateEvent &event);
 			void OnSelectionChange(wxCommandEvent &event);
@@ -139,6 +147,9 @@ namespace REHex {
 			void OnUndoUpdate(wxCommandEvent &event);
 			void OnBecameDirty(wxCommandEvent &event);
 			void OnBecameClean(wxCommandEvent &event);
+			void OnFileDeleted(wxCommandEvent &event);
+			void OnFileModified(wxCommandEvent &event);
+			void OnTitleChanged(DocumentTitleEvent &event);
 			
 			/**
 			 * @brief MainWindow setup phases, in order of execution.
@@ -196,6 +207,14 @@ namespace REHex {
 			static void unregister_setup_hook(SetupPhase phase, const SetupHookFunction *func);
 			
 			/**
+			 * @brief Get a list of all MainWindow instances.
+			 *
+			 * Returns a reference to the internal instances list. Elements are ordered
+			 * from most recently activated (e.g. top of Z order) to least.
+			*/
+			static const std::list<MainWindow*> &get_instances();
+			
+			/**
 			 * @brief Performs RAII-style MainWindow setup hook registration.
 			*/
 			class SetupHookRegistration
@@ -242,8 +261,9 @@ namespace REHex {
 			wxMenu *tools_menu;
 			wxMenu *help_menu;
 			
-			wxAuiNotebook *notebook;
+			DetachableNotebook *notebook;
 			wxBitmap notebook_dirty_bitmap;
+			wxBitmap notebook_bad_bitmap;
 			
 			wxMenu *tool_panels_menu;
 			std::map<std::string, int> tool_panel_name_to_tpm_id;
@@ -258,8 +278,7 @@ namespace REHex {
 			void _update_dirty(REHex::Document *doc);
 			void _update_cpos_buttons(DocumentCtrl *doc_ctrl);
 			
-			bool unsaved_confirm();
-			bool unsaved_confirm(const std::vector<wxString> &files);
+			bool confirm_close_tabs(const std::vector<Tab*> &tabs);
 			
 			void close_tab(Tab *tab);
 			void close_all_tabs();
@@ -267,6 +286,9 @@ namespace REHex {
 			
 			static std::multimap<SetupPhase, const SetupHookFunction*> *setup_hooks;
 			void call_setup_hooks(SetupPhase phase);
+			
+			static std::list<MainWindow*> instances;
+			std::list<MainWindow*>::iterator instances_iter;
 			
 			DECLARE_EVENT_TABLE()
 	};
