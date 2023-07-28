@@ -1,3 +1,9 @@
+rehex (0.60.1-0~debian11) bullseye; urgency=low
+
+  * Install missing parts of binary template plugin.
+
+ -- Daniel Collins <solemnwarning@solemnwarning.net>  Fri, 28 Jul 2023 20:41:31 +0100
+
 rehex (0.60.0-0~debian11) bullseye; urgency=low
 
   * Add data histogram tool (#140).
