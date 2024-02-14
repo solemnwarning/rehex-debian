@@ -15,6 +15,8 @@
  * Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 */
 
+#include "platform.hpp"
+
 #include "RangeChoiceLinear.hpp"
 #include "RangeDialog.hpp"
 #include "util.hpp"
@@ -82,6 +84,24 @@ REHex::RangeChoiceLinear::~RangeChoiceLinear()
 std::pair<off_t, off_t> REHex::RangeChoiceLinear::get_range() const
 {
 	return std::make_pair(current_offset, current_length);
+}
+
+void REHex::RangeChoiceLinear::set_whole_file()
+{
+	current_selection = WHOLE_FILE;
+	clear_fixed_range();
+	
+	SetSelection(current_selection);
+	update_range();
+}
+
+void REHex::RangeChoiceLinear::set_follow_selection()
+{
+	current_selection = FOLLOW_SELECTION;
+	clear_fixed_range();
+	
+	SetSelection(current_selection);
+	update_range();
 }
 
 void REHex::RangeChoiceLinear::update_range()
