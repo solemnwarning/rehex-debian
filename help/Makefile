@@ -18,12 +18,14 @@ HHC ?= "C:\Program Files (x86)\HTML Help Workshop\hhc.exe"
 PERL ?= perl
 
 PAGES := \
+	bitedit \
 	bitmap \
 	bt \
 	bt-funcs \
 	bt-preprocessor \
 	bt-syntax \
 	bt-types \
+	checksum \
 	comments \
 	diff \
 	index \
@@ -72,7 +74,7 @@ WX_TARGETS := \
 
 rehex.htb: $(WX_TARGETS)
 	cp content/* wx/content/* wx/output/
-	zip -rj rehex.htb wx/output/
+	zip -X -rj rehex.htb wx/output/*
 
 wx/output/rehex.%: wx/templates/%.tt contents.txt
 	@mkdir -p wx/output/ $(shell dirname .d/$@.d)

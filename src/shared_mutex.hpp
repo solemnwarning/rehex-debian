@@ -18,6 +18,25 @@
 #ifndef REHEX_SHARED_MUTEX_HPP
 #define REHEX_SHARED_MUTEX_HPP
 
+/* The implementation of std::shared_mutex in MinGW seems to be broken in some
+ * subtle way possibly related to memory barriers and causes unpredictable
+ * crashes and memory corruption, so carry on using my implementation there.
+ *
+ * std::shared_mutex under Linux seems just fine in my testing.
+*/
+
+#if __cplusplus >= 201402L && !(defined(__MINGW32__))
+
+#include <shared_mutex>
+
+namespace REHex
+{
+	using shared_mutex = std::shared_mutex;
+	using shared_lock = std::shared_lock<std::shared_mutex>;
+}
+
+#else
+
 #include <assert.h>
 #include <atomic>
 #include <condition_variable>
@@ -106,5 +125,7 @@ namespace REHex
 			}
 	};
 };
+
+#endif
 
 #endif /* !REHEX_SHARED_MUTEX_HPP */
