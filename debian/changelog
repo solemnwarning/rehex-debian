@@ -1,3 +1,37 @@
+rehex (0.61.0-0~ubuntu2204) jammy; urgency=low
+
+  * Permit trailing commas in template enum definitions (#216).
+
+  * Add overwrite/insert toggle to "Fill range" dialog (#213).
+
+  * Add copy/export context menu commands to strings tool (#210).
+
+  * Fix temporary hang in strings tool when processing large files (#217).
+
+  * Fix settings not being saved during application exit.
+
+  * Batch comments panel updates to improve responsiveness (#205).
+
+  * Add search field to comments panel (#204).
+
+  * Add bit editor tool.
+
+  * Add checksum tool (#219).
+
+  * Add options to search for floating point values.
+
+  * Don't reload files modified externally when requested not to.
+
+  * Start search when Enter is pressed in search dialog input field, or search
+    backwards when Shift+Enter is pressed.
+
+  * Add "Reload automatically" toggle to "File" menu to automatically reload
+    the file when modified externally (and not in the editor) (#222).
+
+  * Preserve scroll position when reloading file.
+
+ -- Daniel Collins <solemnwarning@solemnwarning.net>  Wed, 14 Feb 2024 21:27:51 +0000
+
 rehex (0.60.1-0~ubuntu2204) jammy; urgency=low
 
   * Install missing parts of binary template plugin.
