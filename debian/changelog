@@ -1,3 +1,10 @@
+rehex (0.61.1-0~ubuntu2204) jammy; urgency=low
+
+  * Compare data from correct file offsets when "Collapse matches" option is
+    enabled in compare window (#224).
+
+ -- Daniel Collins <solemnwarning@solemnwarning.net>  Wed, 13 Mar 2024 18:13:45 +0000
+
 rehex (0.61.0-0~ubuntu2204) jammy; urgency=low
 
   * Permit trailing commas in template enum definitions (#216).
