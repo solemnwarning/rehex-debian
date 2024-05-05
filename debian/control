@@ -32,7 +32,7 @@ Depends:
  libcapstone4,
  libjansson4,
  liblua5.3-0,
- libunistring2,
- libwxgtk3.2-1,
+ libunistring5,
+ libwxgtk3.2-1t64,
  zlib1g
 Description: Reverse Engineers' Hex Editor
