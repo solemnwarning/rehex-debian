@@ -4,5 +4,6 @@
 	
 	"ubuntu/focal":     { "distribution": "focal",    "base-release": "0~ubuntu2004", "architectures": [ "amd64" ] },
 	"ubuntu/jammy":     { "distribution": "jammy",    "base-release": "0~ubuntu2204", "architectures": [ "amd64" ] },
-	"ubuntu/mantic":    { "distribution": "mantic",   "base-release": "0~ubuntu2310", "architectures": [ "amd64" ] }
+	"ubuntu/mantic":    { "distribution": "mantic",   "base-release": "0~ubuntu2310", "architectures": [ "amd64" ] },
+	"ubuntu/noble":     { "distribution": "noble",    "base-release": "0~ubuntu2404", "architectures": [ "amd64" ] }
 }

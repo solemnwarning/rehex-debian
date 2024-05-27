@@ -10,6 +10,7 @@ Maintained releases:
 
 - debian/bookworm (Debian 12)
 - debian/bullseye (Debian 11)
+- ubuntu/noble (Ubuntu 24.04)
 - ubuntu/mantic (Ubuntu 23.10)
 - ubuntu/jammy (Ubuntu 22.04)
 - ubuntu/focal (Ubuntu 20.04)
