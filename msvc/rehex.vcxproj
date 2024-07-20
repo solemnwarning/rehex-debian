@@ -44,26 +44,26 @@
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
     <ConfigurationType>Application</ConfigurationType>
     <UseDebugLibraries>true</UseDebugLibraries>
-    <PlatformToolset>v142</PlatformToolset>
+    <PlatformToolset>ClangCL</PlatformToolset>
     <CharacterSet>Unicode</CharacterSet>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Profile (Debug)|Win32'" Label="Configuration">
     <ConfigurationType>Application</ConfigurationType>
     <UseDebugLibraries>true</UseDebugLibraries>
-    <PlatformToolset>v142</PlatformToolset>
+    <PlatformToolset>ClangCL</PlatformToolset>
     <CharacterSet>Unicode</CharacterSet>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'" Label="Configuration">
     <ConfigurationType>Application</ConfigurationType>
     <UseDebugLibraries>false</UseDebugLibraries>
-    <PlatformToolset>v142</PlatformToolset>
+    <PlatformToolset>ClangCL</PlatformToolset>
     <WholeProgramOptimization>true</WholeProgramOptimization>
     <CharacterSet>Unicode</CharacterSet>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Profile (Release)|Win32'" Label="Configuration">
     <ConfigurationType>Application</ConfigurationType>
     <UseDebugLibraries>false</UseDebugLibraries>
-    <PlatformToolset>v142</PlatformToolset>
+    <PlatformToolset>ClangCL</PlatformToolset>
     <WholeProgramOptimization>true</WholeProgramOptimization>
     <CharacterSet>Unicode</CharacterSet>
   </PropertyGroup>
@@ -102,6 +102,7 @@
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
     <Import Project="thirdparty.props" />
     <Import Project="rehex.props" />
+    <Import Project="EnlyzeWinCompatLib\EnlyzeWinCompatLib-dbg.props" />
   </ImportGroup>
   <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Profile (Debug)|Win32'" Label="PropertySheets">
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
@@ -112,6 +113,7 @@
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
     <Import Project="thirdparty.props" />
     <Import Project="rehex.props" />
+    <Import Project="EnlyzeWinCompatLib\EnlyzeWinCompatLib-rel.props" />
   </ImportGroup>
   <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Profile (Release)|Win32'" Label="PropertySheets">
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
@@ -193,6 +195,8 @@
       <SubSystem>Windows</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <AdditionalDependencies>%(AdditionalDependencies)</AdditionalDependencies>
+      <ImageHasSafeExceptionHandlers>false</ImageHasSafeExceptionHandlers>
+      <MinimumRequiredVersion>5.1</MinimumRequiredVersion>
     </Link>
     <PreBuildEvent>
       <Command>$(SolutionDir)gen_content.bat $(TargetPath)</Command>
@@ -217,6 +221,8 @@
       <SubSystem>Windows</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <AdditionalDependencies>%(AdditionalDependencies)</AdditionalDependencies>
+      <MinimumRequiredVersion>5.1</MinimumRequiredVersion>
+      <ImageHasSafeExceptionHandlers>false</ImageHasSafeExceptionHandlers>
     </Link>
     <PreBuildEvent>
       <Command>$(SolutionDir)gen_content.bat $(TargetPath)</Command>
@@ -284,7 +290,7 @@
       <ConformanceMode>true</ConformanceMode>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
-      <PreprocessorDefinitions>NDEBUG;REHEX_CACHE_CHARACTER_BITMAPS;REHEX_CACHE_STRING_BITMAPS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>NDEBUG;REHEX_CACHE_CHARACTER_BITMAPS;REHEX_CACHE_STRING_BITMAPS;BUILD_HELP;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <LanguageStandard>stdcpp20</LanguageStandard>
     </ClCompile>
     <Link>
@@ -293,6 +299,8 @@
       <OptimizeReferences>true</OptimizeReferences>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <AdditionalDependencies>%(AdditionalDependencies)</AdditionalDependencies>
+      <ImageHasSafeExceptionHandlers>false</ImageHasSafeExceptionHandlers>
+      <MinimumRequiredVersion>5.1</MinimumRequiredVersion>
     </Link>
     <PreBuildEvent />
     <PreBuildEvent>
@@ -320,6 +328,8 @@
       <OptimizeReferences>true</OptimizeReferences>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <AdditionalDependencies>%(AdditionalDependencies)</AdditionalDependencies>
+      <MinimumRequiredVersion>5.1</MinimumRequiredVersion>
+      <ImageHasSafeExceptionHandlers>false</ImageHasSafeExceptionHandlers>
     </Link>
     <PreBuildEvent />
     <PreBuildEvent>
@@ -338,7 +348,7 @@
       <ConformanceMode>true</ConformanceMode>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
-      <PreprocessorDefinitions>NDEBUG;REHEX_CACHE_CHARACTER_BITMAPS;REHEX_CACHE_STRING_BITMAPS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>NDEBUG;REHEX_CACHE_CHARACTER_BITMAPS;REHEX_CACHE_STRING_BITMAPS;BUILD_HELP;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <LanguageStandard>stdcpp20</LanguageStandard>
     </ClCompile>
     <Link>
@@ -404,6 +414,7 @@
     <ClCompile Include="..\res\offsets24.c" />
     <ClCompile Include="..\res\offsets32.c" />
     <ClCompile Include="..\res\offsets48.c" />
+    <ClCompile Include="..\res\shortcut48.c" />
     <ClCompile Include="..\res\spinner24.c" />
     <ClCompile Include="..\res\swap_horiz16.c" />
     <ClCompile Include="..\res\swap_vert16.c" />
@@ -416,9 +427,12 @@
     <ClCompile Include="..\src\AppTestable.cpp" />
     <ClCompile Include="..\src\ArtProvider.cpp" />
     <ClCompile Include="..\src\BasicDataTypes.cpp" />
+    <ClCompile Include="..\src\BitArray.cpp" />
     <ClCompile Include="..\src\BitEditor.cpp" />
     <ClCompile Include="..\src\BitmapTool.cpp" />
+    <ClCompile Include="..\src\BitOffset.cpp" />
     <ClCompile Include="..\src\buffer.cpp" />
+    <ClCompile Include="..\src\ByteColourMap.cpp" />
     <ClCompile Include="..\src\BytesPerLineDialog.cpp" />
     <ClCompile Include="..\src\ByteRangeSet.cpp" />
     <ClCompile Include="..\src\CharacterEncoder.cpp" />
@@ -428,10 +442,12 @@
     <ClCompile Include="..\src\ChecksumPanel.cpp" />
     <ClCompile Include="..\src\ClickText.cpp" />
     <ClCompile Include="..\src\CodeCtrl.cpp" />
+    <ClCompile Include="..\src\ColourPickerCtrl.cpp" />
     <ClCompile Include="..\src\CommentTree.cpp" />
     <ClCompile Include="..\src\ConsoleBuffer.cpp" />
     <ClCompile Include="..\src\ConsolePanel.cpp" />
     <ClCompile Include="..\src\CustomMessageDialog.cpp" />
+    <ClCompile Include="..\src\CustomNumericType.cpp" />
     <ClCompile Include="..\src\DataHistogramPanel.cpp" />
     <ClCompile Include="..\src\DataType.cpp" />
     <ClCompile Include="..\src\decodepanel.cpp" />
@@ -445,6 +461,9 @@
     <ClCompile Include="..\src\Events.cpp" />
     <ClCompile Include="..\src\FileWriter.cpp" />
     <ClCompile Include="..\src\FillRangeDialog.cpp" />
+    <ClCompile Include="..\src\FixedSizeValueRegion.cpp" />
+    <ClCompile Include="..\src\HighlightColourMap.cpp" />
+    <ClCompile Include="..\src\HSVColour.cpp" />
     <ClCompile Include="..\src\IntelHexExport.cpp" />
     <ClCompile Include="..\src\IntelHexImport.cpp" />
     <ClCompile Include="..\src\IPC.cpp" />
@@ -460,6 +479,10 @@
     <ClCompile Include="..\src\RangeDialog.cpp" />
     <ClCompile Include="..\src\RangeProcessor.cpp" />
     <ClCompile Include="..\src\search.cpp" />
+    <ClCompile Include="..\src\SettingsDialog.cpp" />
+    <ClCompile Include="..\src\SettingsDialogByteColour.cpp" />
+    <ClCompile Include="..\src\SettingsDialogHighlights.cpp" />
+    <ClCompile Include="..\src\SettingsDialogKeyboard.cpp" />
     <ClCompile Include="..\src\StringPanel.cpp" />
     <ClCompile Include="..\src\Tab.cpp" />
     <ClCompile Include="..\src\textentrydialog.cpp" />
@@ -469,6 +492,7 @@
     <ClCompile Include="..\src\VirtualMappingDialog.cpp" />
     <ClCompile Include="..\src\VirtualMappingList.cpp" />
     <ClCompile Include="..\src\win32lib.cpp" />
+    <ClCompile Include="..\src\WindowCommands.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\res\actual_size16.h" />
@@ -491,6 +515,7 @@
     <ClInclude Include="..\res\offsets24.h" />
     <ClInclude Include="..\res\offsets32.h" />
     <ClInclude Include="..\res\offsets48.h" />
+    <ClInclude Include="..\res\shortcut48.h" />
     <ClInclude Include="..\res\spinner24.h" />
     <ClInclude Include="..\res\swap_horiz16.h" />
     <ClInclude Include="..\res\swap_vert16.h" />

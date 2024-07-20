@@ -14,9 +14,9 @@
 # this program; if not, write to the Free Software Foundation, Inc., 51
 # Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 
-_rehex_botan_version="2.19.3"
+_rehex_botan_version="2.19.4"
 _rehex_botan_url="https://botan.randombit.net/releases/Botan-${_rehex_botan_version}.tar.xz"
-_rehex_botan_sha256="dae047f399c5a47f087db5d3d9d9e8f11ae4985d14c928d71da1aff801802d55"
+_rehex_botan_sha256="5a3a88ef6433e97bcab0efa1ed60c6197e4ada9d9d30bc1c47437bf89b97f276"
 _rehex_botan_build_ident="${_rehex_botan_version}-2"
 
 _rehex_capstone_version="5.0"
@@ -29,9 +29,14 @@ _rehex_jansson_url="https://github.com/akheron/jansson/releases/download/v${_reh
 _rehex_jansson_sha256="5798d010e41cf8d76b66236cfb2f2543c8d082181d16bc3085ab49538d4b9929"
 _rehex_jansson_build_ident="${_rehex_jansson_version}-2"
 
-_rehex_libunistring_version="0.9.10"
+_rehex_libiconv_version="1.17"
+_rehex_libiconv_url="https://ftp.gnu.org/pub/gnu/libiconv/libiconv-${_rehex_libiconv_version}.tar.gz"
+_rehex_libiconv_sha256="8f74213b56238c85a50a5329f77e06198771e70dd9a739779f4c02f65d971313"
+_rehex_libiconv_build_ident="${_rehex_libiconv_version}-1"
+
+_rehex_libunistring_version="1.2"
 _rehex_libunistring_url="https://ftp.gnu.org/gnu/libunistring/libunistring-${_rehex_libunistring_version}.tar.gz"
-_rehex_libunistring_sha256="a82e5b333339a88ea4608e4635479a1cfb2e01aafb925e1290b65710d43f610b"
+_rehex_libunistring_sha256="fd6d5662fa706487c48349a758b57bc149ce94ec6c30624ec9fdc473ceabbc8e"
 _rehex_libunistring_build_ident="${_rehex_libunistring_version}-2"
 
 _rehex_lua_version="5.3.6"
@@ -43,9 +48,9 @@ _rehex_luarocks_version="3.8.0"
 _rehex_luarocks_url="https://luarocks.org/releases/luarocks-${_rehex_luarocks_version}.tar.gz"
 _rehex_luarocks_sha256="56ab9b90f5acbc42eb7a94cf482e6c058a63e8a1effdf572b8b2a6323a06d923"
 
-_rehex_wxwidgets_version="3.2.2.1"
+_rehex_wxwidgets_version="3.2.5"
 _rehex_wxwidgets_url="https://github.com/wxWidgets/wxWidgets/releases/download/v${_rehex_wxwidgets_version}/wxWidgets-${_rehex_wxwidgets_version}.tar.bz2"
-_rehex_wxwidgets_sha256="dffcb6be71296fff4b7f8840eb1b510178f57aa2eb236b20da41182009242c02"
+_rehex_wxwidgets_sha256="0ad86a3ad3e2e519b6a705248fc9226e3a09bbf069c6c692a02acf7c2d1c6b51"
 _rehex_wxwidgets_build_ident="${_rehex_wxwidgets_version}-1"
 
 _rehex_cpanm_version="1.7044"
@@ -100,6 +105,7 @@ fi
 _rehex_botan_target_dir="${_rehex_dep_target_dir}/botan-${_rehex_botan_build_ident}"
 _rehex_capstone_target_dir="${_rehex_dep_target_dir}/capstone-${_rehex_capstone_build_ident}"
 _rehex_jansson_target_dir="${_rehex_dep_target_dir}/jansson-${_rehex_jansson_build_ident}"
+_rehex_libiconv_target_dir="${_rehex_dep_target_dir}/libiconv-${_rehex_libiconv_build_ident}"
 _rehex_libunistring_target_dir="${_rehex_dep_target_dir}/libunistring-${_rehex_libunistring_build_ident}"
 _rehex_lua_target_dir="${_rehex_dep_target_dir}/lua-${_rehex_lua_build_ident}"
 _rehex_wxwidgets_target_dir="${_rehex_dep_target_dir}/wxwidgets-${_rehex_wxwidgets_build_ident}"
@@ -218,6 +224,44 @@ then
 	[ $? -ne 0 ] && _rehex_ok=0
 fi
 
+if [ "$_rehex_ok" = 1 ] && [ ! -e "$_rehex_libiconv_target_dir" ]
+then
+	echo "== Preparing libiconv ${_rehex_libiconv_version}"
+
+	(
+		set -e
+
+		cd "${_rehex_dep_build_dir}"
+
+		_rehex_libiconv_tar="$(basename "${_rehex_libiconv_url}")"
+
+		if [ ! -e "${_rehex_dep_build_dir}/${_rehex_libiconv_tar}" ]
+		then
+			echo "Downloading ${_rehex_libiconv_url}"
+			curl -Lo "${_rehex_libiconv_tar}" "${_rehex_libiconv_url}"
+		fi
+
+		echo "${_rehex_libiconv_sha256}  ${_rehex_libiconv_tar}" | shasum -c
+
+		mkdir -p "libiconv-${_rehex_libiconv_build_ident}"
+
+		tar -xf "${_rehex_libiconv_tar}" -C "libiconv-${_rehex_libiconv_build_ident}"
+		cd "libiconv-${_rehex_libiconv_build_ident}/libiconv-${_rehex_libiconv_version}"
+
+		./configure \
+			--prefix="${_rehex_libiconv_target_dir}" \
+			--enable-shared=no \
+			--enable-static=yes \
+			CFLAGS="-mmacosx-version-min=${_rehex_macos_version_min}"
+
+		make -j$(sysctl -n hw.logicalcpu)
+		make -j$(sysctl -n hw.logicalcpu) check
+		make -j$(sysctl -n hw.logicalcpu) install
+	)
+
+	[ $? -ne 0 ] && _rehex_ok=0
+fi
+
 if [ "$_rehex_ok" = 1 ] && [ ! -e "$_rehex_libunistring_target_dir" ]
 then
 	echo "== Preparing libunistring ${_rehex_libunistring_version}"
@@ -244,6 +288,7 @@ then
 		
 		./configure \
 			--prefix="${_rehex_libunistring_target_dir}" \
+			--with-libiconv-prefix="${_rehex_libiconv_target_dir}" \
 			--enable-shared=no \
 			--enable-static=yes \
 			CFLAGS="-mmacosx-version-min=${_rehex_macos_version_min}"
@@ -341,8 +386,25 @@ then
 		tar -xf "${_rehex_wxwidgets_tar}" -C "wxwidgets-${_rehex_wxwidgets_build_ident}"
 		cd "wxwidgets-${_rehex_wxwidgets_build_ident}/wxWidgets-${_rehex_wxwidgets_version}"
 		
+		# Workaround for https://github.com/wxWidgets/wxWidgets/issues/24560
+		patch <<'EOF'
+--- src/osx/cocoa/toolbar.mm	2024-05-28 00:56:37
++++ src/osx/cocoa/toolbar.mm	2024-05-28 00:57:38
+@@ -970,8 +970,8 @@
+         if (curToolbarRef == NULL)
+         {
+             bResult = true;
+-            [tlw setToolbar:(NSToolbar*) m_macToolbar];
+             [(NSToolbar*) m_macToolbar setVisible:YES];
++            [tlw setToolbar:(NSToolbar*) m_macToolbar];
+ 
+             GetPeer()->Move(0,0,0,0 );
+             SetSize( wxSIZE_AUTO_WIDTH, 0 );
+EOF
+		
 		./configure \
 			--prefix="${_rehex_wxwidgets_target_dir}" \
+			--with-libiconv-prefix="${_rehex_libiconv_target_dir}" \
 			--disable-shared \
 			--enable-unicode \
 			--with-libjpeg=no \
@@ -428,8 +490,9 @@ EOF
 	export WX_CONFIG="${_rehex_wxwidgets_target_dir}/bin/wx-config"
 	
 	export CFLAGS="-mmacosx-version-min=${_rehex_macos_version_min}"
-	export CXXFLAGS="-I${_rehex_libunistring_target_dir}/include/ -mmacosx-version-min=${_rehex_macos_version_min}"
-	export LDLIBS="-L${_rehex_libunistring_target_dir}/lib/ -lunistring"
+	export CXXFLAGS="-I${_rehex_libiconv_target_dir}/include/ -I${_rehex_libunistring_target_dir}/include/ -mmacosx-version-min=${_rehex_macos_version_min}"
+	export LDFLAGS="-L${_rehex_libiconv_target_dir}/lib/ -L${_rehex_libunistring_target_dir}/lib/"
+	export LDLIBS="-liconv -lunistring"
 	
 	export PERL="perl -I\"$(dirname "$(find "${_rehex_perl_libs_target_dir}" -name Template.pm)")\""
 fi
@@ -438,6 +501,7 @@ unset _rehex_perl_libs_target_dir
 unset _rehex_wxwidgets_target_dir
 unset _rehex_lua_target_dir
 unset _rehex_libunistring_target_dir
+unset _rehex_libiconv_target_dir
 unset _rehex_jansson_target_dir
 unset _rehex_capstone_target_dir
 unset _rehex_botan_target_dir
@@ -470,6 +534,11 @@ unset _rehex_libunistring_build_ident
 unset _rehex_libunistring_sha256
 unset _rehex_libunistring_url
 unset _rehex_libunistring_version
+
+unset _rehex_libiconv_build_ident
+unset _rehex_libiconv_sha256
+unset _rehex_libiconv_url
+unset _rehex_libiconv_version
 
 unset _rehex_jansson_build_ident
 unset _rehex_jansson_sha256
