@@ -1,5 +1,5 @@
 /* Reverse Engineer's Hex Editor
- * Copyright (C) 2017-2023 Daniel Collins <solemnwarning@solemnwarning.net>
+ * Copyright (C) 2017-2024 Daniel Collins <solemnwarning@solemnwarning.net>
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 as published by
@@ -28,10 +28,13 @@
 #include <wx/splitter.h>
 #include <wx/wx.h>
 
+#include "BitOffset.hpp"
 #include "DiffWindow.hpp"
 #include "document.hpp"
 #include "DocumentCtrl.hpp"
 #include "Events.hpp"
+#include "SafeWindowPointer.hpp"
+#include "SettingsDialog.hpp"
 #include "SharedDocumentPointer.hpp"
 #include "ToolPanel.hpp"
 
@@ -93,7 +96,7 @@ namespace REHex
 			void set_auto_reload(bool auto_reload);
 			
 			/* Public for use by unit tests. */
-			static std::vector<DocumentCtrl::Region*> compute_regions(SharedDocumentPointer doc, off_t real_offset_base, off_t virt_offset_base, off_t length, InlineCommentMode inline_comment_mode);
+			static std::vector<DocumentCtrl::Region*> compute_regions(SharedDocumentPointer doc, BitOffset real_offset_base, BitOffset virt_offset_base, BitOffset length, InlineCommentMode inline_comment_mode);
 			
 		private:
 			InlineCommentMode inline_comment_mode;
@@ -107,6 +110,8 @@ namespace REHex
 			std::map<std::string, ToolPanel*> tools;
 			std::set<wxDialog*> search_dialogs;
 			
+			SafeWindowPointer<SettingsDialog> doc_properties;
+			
 			void OnSize(wxSizeEvent &size);
 			
 			void OnHToolChange(wxBookCtrlEvent &event);
@@ -117,8 +122,8 @@ namespace REHex
 			
 			void OnDocumentCtrlChar(wxKeyEvent &key);
 			
-			void OnCommentLeftClick(OffsetLengthEvent &event);
-			void OnCommentRightClick(OffsetLengthEvent &event);
+			void OnCommentLeftClick(BitRangeEvent &event);
+			void OnCommentRightClick(BitRangeEvent &event);
 			void OnDataRightClick(wxCommandEvent &event);
 			
 			void OnDocumentDataErase(OffsetLengthEvent &event);
