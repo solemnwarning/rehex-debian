@@ -1,5 +1,5 @@
 /* Reverse Engineer's Hex Editor
- * Copyright (C) 2018-2021 Daniel Collins <solemnwarning@solemnwarning.net>
+ * Copyright (C) 2018-2024 Daniel Collins <solemnwarning@solemnwarning.net>
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 as published by
@@ -282,7 +282,7 @@ void REHex::Search::OnFindNext(wxCommandEvent &event)
 {
 	if(read_base_window_controls() && read_window_controls())
 	{
-		begin_search((doc->get_cursor_position() + 1), range_end, SearchDirection::FORWARDS);
+		begin_search((doc->get_cursor_position().byte() + 1), range_end, SearchDirection::FORWARDS);
 	}
 }
 
@@ -290,7 +290,7 @@ void REHex::Search::OnFindPrev(wxCommandEvent &event)
 {
 	if(read_base_window_controls() && read_window_controls())
 	{
-		begin_search(range_begin, doc->get_cursor_position(), SearchDirection::BACKWARDS);
+		begin_search(range_begin, doc->get_cursor_position().byte(), SearchDirection::BACKWARDS);
 	}
 }
 
@@ -348,7 +348,7 @@ void REHex::Search::OnTimer(wxTimerEvent &event)
 		
 		if(match_found_at >= 0)
 		{
-			doc->set_cursor_position(match_found_at);
+			doc->set_cursor_position(BitOffset(match_found_at));
 		}
 		else{
 			size_t compare_size = test_max_window();
@@ -1173,7 +1173,7 @@ bool REHex::Search::Value::read_window_controls()
 			f32_epsilon = parse_float(epsilon_tc->GetStringValue().ToStdString());
 			f32_enabled = true;
 		}
-		catch(const ParseError &e) {}
+		catch(const ParseError&) {}
 	}
 	
 	f64_enabled = false;
@@ -1184,7 +1184,7 @@ bool REHex::Search::Value::read_window_controls()
 			f64_epsilon = parse_double(epsilon_tc->GetStringValue().ToStdString());
 			f64_enabled = true;
 		}
-		catch(const ParseError &e) {}
+		catch(const ParseError&) {}
 	}
 	
 	if(search_for.empty() && !f32_enabled && !f64_enabled)
@@ -1233,10 +1233,10 @@ void REHex::Search::Value::OnText(wxCommandEvent &event)
 	f32_cb->Disable();
 	
 	try { parse_float(search_for_tc->GetStringValue().ToStdString()); f32_cb->Enable(); }
-	catch(const ParseError &e) {}
+	catch(const ParseError&) {}
 	
 	f64_cb->Disable();
 	
 	try { parse_double(search_for_tc->GetStringValue().ToStdString()); f64_cb->Enable(); }
-	catch(const ParseError &e) {}
+	catch(const ParseError&) {}
 }

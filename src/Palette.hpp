@@ -1,5 +1,5 @@
 /* Reverse Engineer's Hex Editor
- * Copyright (C) 2018-2020 Daniel Collins <solemnwarning@solemnwarning.net>
+ * Copyright (C) 2018-2024 Daniel Collins <solemnwarning@solemnwarning.net>
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 as published by
@@ -28,8 +28,6 @@ namespace REHex {
 	class Palette
 	{
 		public:
-			static const int NUM_HIGHLIGHT_COLOURS = 6;
-			
 			enum ColourIndex
 			{
 				PAL_NORMAL_TEXT_BG,
@@ -43,21 +41,21 @@ namespace REHex {
 				PAL_SECONDARY_SELECTED_TEXT_FG,
 				PAL_DIRTY_TEXT_BG,
 				PAL_DIRTY_TEXT_FG,
-				
-				PAL_HIGHLIGHT_TEXT_MIN_BG,
-				PAL_HIGHLIGHT_TEXT_MIN_FG,
-				PAL_HIGHLIGHT_TEXT_MAX_BG = (PAL_HIGHLIGHT_TEXT_MIN_BG + (NUM_HIGHLIGHT_COLOURS - 1) * 2),
-				PAL_HIGHLIGHT_TEXT_MAX_FG = (PAL_HIGHLIGHT_TEXT_MIN_FG + (NUM_HIGHLIGHT_COLOURS - 1) * 2),
-				
 				PAL_COMMENT_BG,
 				PAL_COMMENT_FG,
 				
-				PAL_MAX = PAL_COMMENT_FG,
+				PAL_CONTRAST_TEXT_1_FG,
+				PAL_CONTRAST_TEXT_2_FG,
+				PAL_CONTRAST_TEXT_3_FG,
+				PAL_CONTRAST_TEXT_4_FG,
+				PAL_CONTRAST_TEXT_5_FG,
+				
+				PAL_MAX = PAL_CONTRAST_TEXT_5_FG,
 				
 				PAL_INVALID = 9999,
 			};
 			
-			Palette(const std::string &name, const std::string &label, const wxColour colours[]);
+			Palette(const std::string &name, const std::string &label, const wxColour colours[], int default_highlight_lightness);
 			
 			/**
 			 * @brief Get the internal name of the palette.
@@ -77,34 +75,6 @@ namespace REHex {
 			const wxColour &operator[](int index) const;
 			
 			/**
-			 * @brief Get the background colour for the given text highlight colour.
-			 *
-			 * @param highlight_idx Highlight index (0 .. NUM_HIGHLIGHT_COLOURS - 1).
-			*/
-			const wxColour &get_highlight_bg(int highlight_idx) const;
-			
-			/**
-			 * @brief Get the foreground colour for the given text highlight colour.
-			 *
-			 * @param highlight_idx Highlight index (0 .. NUM_HIGHLIGHT_COLOURS - 1).
-			*/
-			const wxColour &get_highlight_fg(int highlight_idx) const;
-			
-			/**
-			 * @brief Get the background colour palette index for the given text highlight colour.
-			 *
-			 * @param index Highlight index (0 .. NUM_HIGHLIGHT_COLOURS - 1).
-			*/
-			static ColourIndex get_highlight_bg_idx(int index);
-			
-			/**
-			 * @brief Get the foreground colour palette index for the given text highlight colour.
-			 *
-			 * @param index Highlight index (0 .. NUM_HIGHLIGHT_COLOURS - 1).
-			*/
-			static ColourIndex get_highlight_fg_idx(int index);
-			
-			/**
 			 * @brief Blend two palette colours together.
 			 *
 			 * @param colour_a_idx Palette index of colour A (0 .. PAL_MAX).
@@ -117,6 +87,8 @@ namespace REHex {
 			*/
 			static wxColour get_average_colour(const wxColour &colour_a, const wxColour &colour_b);
 			
+			int get_default_highlight_lightness() const;
+			
 			static Palette *create_system_palette();
 			static Palette *create_light_palette();
 			static Palette *create_dark_palette();
@@ -126,6 +98,7 @@ namespace REHex {
 			std::string label;
 			
 			wxColour palette[PAL_MAX + 1];
+			int default_highlight_lightness;
 	};
 	
 	/**
