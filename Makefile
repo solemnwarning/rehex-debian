@@ -1,5 +1,5 @@
 # Reverse Engineer's Hex Editor
-# Copyright (C) 2017-2023 Daniel Collins <solemnwarning@solemnwarning.net>
+# Copyright (C) 2017-2024 Daniel Collins <solemnwarning@solemnwarning.net>
 #
 # This program is free software; you can redistribute it and/or modify it
 # under the terms of the GNU General Public License version 2 as published by
@@ -24,8 +24,12 @@ CXXSTD       ?= -std=c++11
 
 EXE ?= rehex
 EMBED_EXE ?= ./tools/embed
+TEST_EXE ?= ./tests/all-tests
 GTKCONFIG_EXE ?= ./tools/gtk-config
 HELP_TARGET ?= help/rehex.htb
+
+DEFAULT_EXE_TARGET  ?= $(EXE)
+DEFAULT_TEST_TARGET ?= $(TEST_EXE)
 
 # Wrapper around the $(shell) function that aborts the build if the command
 # exits with a nonzero status.
@@ -42,7 +46,7 @@ shell-or-die = $\
 
 NONCOMPILE_TARGETS=clean distclean dist
 
-need_compiler_flags=1
+need_compiler_flags ?= 1
 ifneq ($(MAKECMDGOALS),)
 	ifeq ($(filter-out $(NONCOMPILE_TARGETS),$(MAKECMDGOALS)),)
 		need_compiler_flags=0
@@ -99,7 +103,7 @@ else
 		ifeq ($(BUILD_TYPE),profile)
 			BASE_CFLAGS += $(PROFILE_CFLAGS)
 		else
-			$(error unknown BUILD_TYPE '$(BUILD_TYPE)')
+			X := $(error unknown BUILD_TYPE '$(BUILD_TYPE)' (should be release, debug or profile))
 		endif
 	endif
 endif
@@ -119,7 +123,7 @@ endif
 LDLIBS := -lunistring $(WX_LIBS) $(GTK_LIBS) $(BOTAN_LIBS) $(CAPSTONE_LIBS) $(JANSSON_LIBS) $(LUA_LIBS) $(LDLIBS)
 
 # Define this for releases
-VERSION := 0.61.1
+VERSION := 0.62.0
 
 ifdef VERSION
 	LONG_VERSION := Version $(VERSION)
@@ -135,8 +139,8 @@ else
 	
 	GIT_COMMIT_TIME ?= $(call shell-or-die,git log -1 --format="%ct")
 	
-	VERSION      := 9c50a30d529172ddfc1938c4fad8f6c1572b9733
-	LONG_VERSION := Snapshot 9c50a30d529172ddfc1938c4fad8f6c1572b9733
+	VERSION      := 513172506f17f58a4a56045873bcc043eede2a98
+	LONG_VERSION := Snapshot 513172506f17f58a4a56045873bcc043eede2a98
 endif
 
 DEPDIR := .d
@@ -156,8 +160,8 @@ all: $(EXE)
 .SECONDARY:
 
 .PHONY: check
-check: tests/all-tests
-	./tests/all-tests
+check: $(TEST_EXE)
+	$(TEST_EXE)
 	
 	for p in $(PLUGINS); \
 	do \
@@ -184,6 +188,7 @@ clean:
 	      res/offsets24.c res/offsets24.h \
 	      res/offsets32.c res/offsets32.h \
 	      res/offsets48.c res/offsets48.h \
+	      res/shortcut48.c  res/shortcut48.h \
 	      res/spinner24.c   res/spinner24.h
 	
 	rm -f $(filter-out %.$(BUILD_TYPE).o,$(APP_OBJS))
@@ -196,7 +201,7 @@ clean:
 	rm -f $(patsubst %.$(BUILD_TYPE).o,%.debug.o,$(filter %.$(BUILD_TYPE).o,$(TEST_OBJS)))
 	rm -f $(patsubst %.$(BUILD_TYPE).o,%.release.o,$(filter %.$(BUILD_TYPE).o,$(TEST_OBJS)))
 	rm -f $(patsubst %.$(BUILD_TYPE).o,%.profile.o,$(filter %.$(BUILD_TYPE).o,$(TEST_OBJS)))
-	rm -f ./tests/all-tests
+	rm -f $(TEST_EXE)
 	
 	rm -f $(EMBED_EXE)
 	rm -f $(GTKCONFIG_EXE)
@@ -334,6 +339,7 @@ APP_OBJS := \
 	res/offsets24.o \
 	res/offsets32.o \
 	res/offsets48.o \
+	res/shortcut48.o \
 	res/spinner24.o \
 	res/swap_horiz16.o \
 	res/swap_vert16.o \
@@ -345,10 +351,13 @@ APP_OBJS := \
 	src/AppTestable.$(BUILD_TYPE).o \
 	src/ArtProvider.$(BUILD_TYPE).o \
 	src/BasicDataTypes.$(BUILD_TYPE).o \
+	src/BitArray.$(BUILD_TYPE).o \
 	src/BitEditor.$(BUILD_TYPE).o \
+	src/BitOffset.$(BUILD_TYPE).o \
 	src/BitmapTool.$(BUILD_TYPE).o \
 	src/buffer.$(BUILD_TYPE).o \
 	src/BytesPerLineDialog.$(BUILD_TYPE).o \
+	src/ByteColourMap.$(BUILD_TYPE).o \
 	src/ByteRangeSet.$(BUILD_TYPE).o \
 	src/CharacterEncoder.$(BUILD_TYPE).o \
 	src/CharacterFinder.$(BUILD_TYPE).o \
@@ -357,10 +366,12 @@ APP_OBJS := \
 	src/ChecksumPanel.$(BUILD_TYPE).o \
 	src/ClickText.$(BUILD_TYPE).o \
 	src/CodeCtrl.$(BUILD_TYPE).o \
+	src/ColourPickerCtrl.$(BUILD_TYPE).o \
 	src/CommentTree.$(BUILD_TYPE).o \
 	src/ConsoleBuffer.$(BUILD_TYPE).o \
 	src/ConsolePanel.$(BUILD_TYPE).o \
 	src/CustomMessageDialog.$(BUILD_TYPE).o \
+	src/CustomNumericType.$(BUILD_TYPE).o \
 	src/DataHistogramPanel.$(BUILD_TYPE).o \
 	src/DataType.$(BUILD_TYPE).o \
 	src/decodepanel.$(BUILD_TYPE).o \
@@ -374,6 +385,9 @@ APP_OBJS := \
 	src/Events.$(BUILD_TYPE).o \
 	src/FileWriter.$(BUILD_TYPE).o \
 	src/FillRangeDialog.$(BUILD_TYPE).o \
+	src/FixedSizeValueRegion.$(BUILD_TYPE).o \
+	src/HighlightColourMap.$(BUILD_TYPE).o \
+	src/HSVColour.$(BUILD_TYPE).o \
 	src/IntelHexExport.$(BUILD_TYPE).o \
 	src/IntelHexImport.$(BUILD_TYPE).o \
 	src/IPC.$(BUILD_TYPE).o \
@@ -389,6 +403,10 @@ APP_OBJS := \
 	src/RangeDialog.$(BUILD_TYPE).o \
 	src/RangeProcessor.$(BUILD_TYPE).o \
 	src/search.$(BUILD_TYPE).o \
+	src/SettingsDialog.$(BUILD_TYPE).o \
+	src/SettingsDialogByteColour.$(BUILD_TYPE).o \
+	src/SettingsDialogHighlights.$(BUILD_TYPE).o \
+	src/SettingsDialogKeyboard.$(BUILD_TYPE).o \
 	src/StringPanel.$(BUILD_TYPE).o \
 	src/textentrydialog.$(BUILD_TYPE).o \
 	src/Tab.$(BUILD_TYPE).o \
@@ -398,12 +416,13 @@ APP_OBJS := \
 	src/VirtualMappingDialog.$(BUILD_TYPE).o \
 	src/VirtualMappingList.$(BUILD_TYPE).o \
 	src/win32lib.$(BUILD_TYPE).o \
+	src/WindowCommands.$(BUILD_TYPE).o \
 	$(WXLUA_OBJS) \
 	$(WXBIND_OBJS) \
 	$(WXFREECHART_OBJS) \
 	$(EXTRA_APP_OBJS)
 
-$(EXE): $(APP_OBJS) $(GTKCONFIG_EXE)
+$(DEFAULT_EXE_TARGET): $(APP_OBJS) $(GTKCONFIG_EXE)
 	$(CXX) $(CXXFLAGS) -DLONG_VERSION='"$(LONG_VERSION)"' -DSHORT_VERSION='"$(VERSION)"' -DLIBDIR='"$(libdir)"' -DDATADIR='"$(datadir)"' -c -o res/version.o res/version.cpp
 	$(CXX) $(CXXFLAGS) -o $@ $(APP_OBJS) res/version.o $(LDFLAGS) $(LDLIBS)
 
@@ -429,6 +448,7 @@ TEST_OBJS := \
 	res/offsets24.o \
 	res/offsets32.o \
 	res/offsets48.o \
+	res/shortcut48.o \
 	res/spinner24.o \
 	res/swap_horiz16.o \
 	res/swap_vert16.o \
@@ -439,8 +459,11 @@ TEST_OBJS := \
 	src/AppTestable.$(BUILD_TYPE).o \
 	src/ArtProvider.$(BUILD_TYPE).o \
 	src/BasicDataTypes.$(BUILD_TYPE).o \
+	src/BitArray.$(BUILD_TYPE).o \
+	src/BitOffset.$(BUILD_TYPE).o \
 	src/BitmapTool.$(BUILD_TYPE).o \
 	src/buffer.$(BUILD_TYPE).o \
+	src/ByteColourMap.$(BUILD_TYPE).o \
 	src/ByteRangeSet.$(BUILD_TYPE).o \
 	src/BytesPerLineDialog.$(BUILD_TYPE).o \
 	src/CharacterEncoder.$(BUILD_TYPE).o \
@@ -448,9 +471,11 @@ TEST_OBJS := \
 	src/Checksum.$(BUILD_TYPE).o \
 	src/ChecksumImpl.$(BUILD_TYPE).o \
 	src/ClickText.$(BUILD_TYPE).o \
+	src/ColourPickerCtrl.$(BUILD_TYPE).o \
 	src/CommentTree.$(BUILD_TYPE).o \
 	src/ConsoleBuffer.$(BUILD_TYPE).o \
 	src/CustomMessageDialog.$(BUILD_TYPE).o \
+	src/CustomNumericType.$(BUILD_TYPE).o \
 	src/DataType.$(BUILD_TYPE).o \
 	src/DetachableNotebook.$(BUILD_TYPE).o \
 	src/DiffWindow.$(BUILD_TYPE).o \
@@ -461,6 +486,9 @@ TEST_OBJS := \
 	src/Events.$(BUILD_TYPE).o \
 	src/FileWriter.$(BUILD_TYPE).o \
 	src/FillRangeDialog.$(BUILD_TYPE).o \
+	src/FixedSizeValueRegion.$(BUILD_TYPE).o \
+	src/HighlightColourMap.$(BUILD_TYPE).o \
+	src/HSVColour.$(BUILD_TYPE).o \
 	src/IntelHexExport.$(BUILD_TYPE).o \
 	src/IntelHexImport.$(BUILD_TYPE).o \
 	src/LicenseDialog.$(BUILD_TYPE).o \
@@ -473,6 +501,10 @@ TEST_OBJS := \
 	src/RangeDialog.$(BUILD_TYPE).o \
 	src/RangeProcessor.$(BUILD_TYPE).o \
 	src/search.$(BUILD_TYPE).o \
+	src/SettingsDialog.$(BUILD_TYPE).o \
+	src/SettingsDialogByteColour.$(BUILD_TYPE).o \
+	src/SettingsDialogHighlights.$(BUILD_TYPE).o \
+	src/SettingsDialogKeyboard.$(BUILD_TYPE).o \
 	src/StringPanel.$(BUILD_TYPE).o \
 	src/Tab.$(BUILD_TYPE).o \
 	src/textentrydialog.$(BUILD_TYPE).o \
@@ -481,8 +513,13 @@ TEST_OBJS := \
 	src/util.$(BUILD_TYPE).o \
 	src/VirtualMappingDialog.$(BUILD_TYPE).o \
 	src/win32lib.$(BUILD_TYPE).o \
+	src/WindowCommands.$(BUILD_TYPE).o \
 	tests/BitmapTool.o \
-	tests/buffer.o \
+	tests/BitOffset.o \
+	tests/BufferTest1.o \
+	tests/BufferTest2.o \
+	tests/BufferTest3.o \
+	tests/ByteColourMap.o \
 	tests/ByteRangeMap.o \
 	tests/ByteRangeSet.o \
 	tests/ByteRangeTree.o \
@@ -492,6 +529,8 @@ TEST_OBJS := \
 	tests/CommentsDataObject.o \
 	tests/CommentTree.o \
 	tests/ConsoleBuffer.o \
+	tests/CustomNumericType.o \
+	tests/DataType.o \
 	tests/DataHistogramAccumulator.o \
 	tests/DiffWindow.o \
 	tests/DisassemblyRegion.o \
@@ -500,6 +539,8 @@ TEST_OBJS := \
 	tests/endian_conv.o \
 	tests/FastRectangleFiller.o \
 	tests/FileWriter.o \
+	tests/HighlightColourMap.o \
+	tests/HSVColour.o \
 	tests/IntelHexExport.o \
 	tests/IntelHexImport.o \
 	tests/LuaPluginLoader.o \
@@ -517,11 +558,12 @@ TEST_OBJS := \
 	tests/Tab.o \
 	tests/testutil.o \
 	tests/util.o \
+	tests/WindowCommands.o \
 	$(WXLUA_OBJS) \
 	$(WXBIND_OBJS) \
 	$(EXTRA_TEST_OBJS)
 
-tests/all-tests: $(TEST_OBJS) $(GTKCONFIG_EXE)
+$(DEFAULT_TEST_TARGET): $(TEST_OBJS) $(GTKCONFIG_EXE)
 	$(CXX) $(CXXFLAGS) -DLONG_VERSION='"$(LONG_VERSION)"' -DSHORT_VERSION='"$(VERSION)"' -DLIBDIR='"$(libdir)"' -DDATADIR='"$(datadir)"' -c -o res/version.o res/version.cpp
 	$(CXX) $(CXXFLAGS) -o $@ $(TEST_OBJS) res/version.o $(LDFLAGS) $(LDLIBS)
 
@@ -545,6 +587,7 @@ src/DiffWindow.$(BUILD_TYPE).o: res/icon16.h res/icon32.h res/icon48.h res/icon6
 src/LicenseDialog.$(BUILD_TYPE).o: res/license.h
 src/LuaPluginLoader.$(BUILD_TYPE).o: src/lua-bindings/rehex_bind.h src/lua-plugin-preload.h
 src/mainwindow.$(BUILD_TYPE).o: res/icon16.h res/icon32.h res/icon48.h res/icon64.h
+src/SettingsDialogKeyboard.$(BUILD_TYPE).o: res/shortcut48.h
 src/StringPanel.$(BUILD_TYPE).o: res/spinner24.h
 
 res/license.done: LICENSE.txt $(EMBED_EXE)
@@ -706,8 +749,8 @@ else
 	git ls-files | xargs cp --parents -t rehex-$(VERSION)/
 	
 	# Inline any references to the HEAD commit sha/timestamp
-	sed -i -e "s|\$9c50a30d529172ddfc1938c4fad8f6c1572b9733|9c50a30d529172ddfc1938c4fad8f6c1572b9733|g" rehex-$(VERSION)/Makefile
-	sed -i -e "s|\$1710353139|1710353139|g" rehex-$(VERSION)/Makefile
+	sed -i -e "s|\$513172506f17f58a4a56045873bcc043eede2a98|513172506f17f58a4a56045873bcc043eede2a98|g" rehex-$(VERSION)/Makefile
+	sed -i -e "s|\$1721479842|1721479842|g" rehex-$(VERSION)/Makefile
 endif
 	
 	# Generate reproducible tarball. All files use git commit timestamp.
@@ -715,7 +758,7 @@ endif
 		LC_ALL=C sort -z | \
 		tar \
 			--format=ustar \
-			--mtime=@1710353139 \
+			--mtime=@1721479842 \
 			--owner=0 --group=0 --numeric-owner \
 			--no-recursion --null  -T - \
 			-cf - | \
