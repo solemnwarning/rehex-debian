@@ -1,5 +1,5 @@
 /* Reverse Engineer's Hex Editor
- * Copyright (C) 2017-2023 Daniel Collins <solemnwarning@solemnwarning.net>
+ * Copyright (C) 2017-2024 Daniel Collins <solemnwarning@solemnwarning.net>
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 as published by
@@ -29,6 +29,7 @@
 #include "Events.hpp"
 #include "Tab.hpp"
 #include "ToolPanel.hpp"
+#include "WindowCommands.hpp"
 
 namespace REHex {
 	/**
@@ -102,6 +103,7 @@ namespace REHex {
 			void OnSearchBSeq(wxCommandEvent &event);
 			void OnSearchValue(wxCommandEvent &event);
 			void OnCompareFile(wxCommandEvent &event);
+			void OnCompareSelection(wxCommandEvent &event);
 			void OnGotoOffset(wxCommandEvent &event);
 			void OnCut(wxCommandEvent &event);
 			void OnCopy(wxCommandEvent &event);
@@ -113,6 +115,7 @@ namespace REHex {
 			void OnFillRange(wxCommandEvent &event);
 			void OnOverwriteMode(wxCommandEvent &event);
 			void OnWriteProtect(wxCommandEvent &event);
+			void OnSettings(wxCommandEvent &event);
 			
 			void OnSetBytesPerLine(wxCommandEvent &event);
 			void OnSetBytesPerGroup(wxCommandEvent &event);
@@ -122,6 +125,7 @@ namespace REHex {
 			void OnAsmSyntax(wxCommandEvent &event);
 			void OnDocumentDisplayMode(wxCommandEvent &event);
 			void OnHighlightSelectionMatch(wxCommandEvent &event);
+			void OnColourMap(wxCommandEvent &event);
 			void OnShowToolPanel(wxCommandEvent &event, const REHex::ToolPanelRegistration *tpr);
 			void OnPalette(wxCommandEvent &event);
 			void OnFSAIncrease(wxCommandEvent &event);
@@ -151,6 +155,14 @@ namespace REHex {
 			void OnFileDeleted(wxCommandEvent &event);
 			void OnFileModified(wxCommandEvent &event);
 			void OnTitleChanged(DocumentTitleEvent &event);
+			
+			void OnByteColourMapsChanged(wxCommandEvent &event);
+			void OnAcceleratorsChanged(wxCommandEvent &event);
+			
+			void OnSetCommentAtCursor(wxCommandEvent &event);
+			void OnSetCommentOnSelection(wxCommandEvent &event);
+			void OnSetHighlight(wxCommandEvent &event);
+			void OnRemoveHighlight(wxCommandEvent &event);
 			
 			/**
 			 * @brief MainWindow setup phases, in order of execution.
@@ -208,6 +220,11 @@ namespace REHex {
 			static void unregister_setup_hook(SetupPhase phase, const SetupHookFunction *func);
 			
 			/**
+			 * @brief Gets the configurable window commands and their default accelerators.
+			*/
+			static std::vector<WindowCommand> get_template_commands();
+			
+			/**
 			 * @brief Get a list of all MainWindow instances.
 			 *
 			 * Returns a reference to the internal instances list. Elements are ordered
@@ -262,6 +279,9 @@ namespace REHex {
 			wxMenu *tools_menu;
 			wxMenu *help_menu;
 			
+			wxMenu *colour_map_menu;
+			std::map<int, int> colour_map_menu_id_to_bcm_id;
+			
 			DetachableNotebook *notebook;
 			wxBitmap notebook_dirty_bitmap;
 			wxBitmap notebook_bad_bitmap;
@@ -278,6 +298,7 @@ namespace REHex {
 			void _update_undo(REHex::Document *doc);
 			void _update_dirty(REHex::Document *doc);
 			void _update_cpos_buttons(DocumentCtrl *doc_ctrl);
+			void _update_colour_map_menu(DocumentCtrl *doc_ctrl);
 			
 			bool confirm_close_tabs(const std::vector<Tab*> &tabs);
 			
@@ -290,6 +311,8 @@ namespace REHex {
 			
 			static std::list<MainWindow*> instances;
 			std::list<MainWindow*>::iterator instances_iter;
+			
+			WindowCommandTable window_commands;
 			
 			DECLARE_EVENT_TABLE()
 	};
