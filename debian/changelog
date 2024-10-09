@@ -1,3 +1,9 @@
+rehex (0.62.0-0~ubuntu2410+1) oracular; urgency=low
+
+ * Re-release with correct distribution.
+
+ -- Daniel Collins <solemnwarning@solemnwarning.net>  Thu, 10 Oct 2024 00:23:04 +0100
+
 rehex (0.62.0-0~ubuntu2410) noble; urgency=low
 
   * Add bit array data type (#167).
