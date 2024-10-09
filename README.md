@@ -10,8 +10,8 @@ Maintained releases:
 
 - debian/bookworm (Debian 12)
 - debian/bullseye (Debian 11)
+- ubuntu/oracular (Ubuntu 24.10)
 - ubuntu/noble (Ubuntu 24.04)
-- ubuntu/mantic (Ubuntu 23.10)
 - ubuntu/jammy (Ubuntu 22.04)
 - ubuntu/focal (Ubuntu 20.04)
 
@@ -19,6 +19,7 @@ Obsolete releases:
 
 - debian/buster (Debian 10)
 - debian/stretch (Debian 9)
+- ubuntu/mantic (Ubuntu 23.10)
 - ubuntu/lunar (Ubuntu 23.04)
 - ubuntu/kinetic (Ubuntu 22.10)
 - ubuntu/impish (Ubuntu 21.10)
