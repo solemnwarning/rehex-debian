@@ -1,4 +1,4 @@
-rehex (0.62.0-0~ubuntu2404) noble; urgency=low
+rehex (0.62.0-0~ubuntu2410) noble; urgency=low
 
   * Add bit array data type (#167).
 
@@ -27,7 +27,7 @@ rehex (0.62.0-0~ubuntu2404) noble; urgency=low
 
   * Allow navigating hex data by nibbles rather than bytes (#58).
 
- -- Daniel Collins <solemnwarning@solemnwarning.net>  Sat, 20 Jul 2024 18:40:00 +0100
+ -- Daniel Collins <solemnwarning@solemnwarning.net>  Wed, 09 Oct 2024 01:18:52 +0100
 
 rehex (0.61.1-0~ubuntu2404) noble; urgency=low
 
