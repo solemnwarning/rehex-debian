@@ -1,10 +1,4 @@
-rehex (0.62.0-0~ubuntu2410+1) oracular; urgency=low
-
- * Re-release with correct distribution.
-
- -- Daniel Collins <solemnwarning@solemnwarning.net>  Thu, 10 Oct 2024 00:23:04 +0100
-
-rehex (0.62.0-0~ubuntu2410) noble; urgency=low
+rehex (0.62.0-0~ubuntu2504) plucky; urgency=low
 
   * Add bit array data type (#167).
 
@@ -33,7 +27,7 @@ rehex (0.62.0-0~ubuntu2410) noble; urgency=low
 
   * Allow navigating hex data by nibbles rather than bytes (#58).
 
- -- Daniel Collins <solemnwarning@solemnwarning.net>  Wed, 09 Oct 2024 01:18:52 +0100
+ -- Daniel Collins <solemnwarning@solemnwarning.net>  Fri, 02 May 2025 01:11:13 +0100
 
 rehex (0.61.1-0~ubuntu2404) noble; urgency=low
 

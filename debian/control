@@ -29,7 +29,7 @@ Depends:
  ${shlibs:Depends},
  ${misc:Depends},
  libbotan-2-19,
- libcapstone4,
+ libcapstone5,
  libjansson4,
  liblua5.3-0,
  libunistring5,
