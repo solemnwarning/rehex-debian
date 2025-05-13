@@ -10,6 +10,7 @@ Maintained releases:
 
 - debian/bookworm (Debian 12)
 - debian/bullseye (Debian 11)
+- ubuntu/plucky (Ubuntu 25.04)
 - ubuntu/oracular (Ubuntu 24.10)
 - ubuntu/noble (Ubuntu 24.04)
 - ubuntu/jammy (Ubuntu 22.04)
