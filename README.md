@@ -9,6 +9,7 @@ Each distro/release has a dedicated branch to allow for any necessary changes be
 Maintained releases:
 
 - debian/bookworm (Debian 12)
+- debian/bullseye (Debian 11)
 - ubuntu/plucky (Ubuntu 25.04)
 - ubuntu/oracular (Ubuntu 24.10)
 - ubuntu/noble (Ubuntu 24.04)
@@ -16,7 +17,6 @@ Maintained releases:
 
 Obsolete releases:
 
-- debian/bullseye (Debian 11)
 - debian/buster (Debian 10)
 - debian/stretch (Debian 9)
 - ubuntu/mantic (Ubuntu 23.10)

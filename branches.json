@@ -1,4 +1,5 @@
 {
+	"debian/bullseye":  { "distribution": "bullseye",  "base-release": "0~debian11", "architectures": [ "i386", "amd64" ] },
 	"debian/bookworm":  { "distribution": "bookworm",  "base-release": "0~debian12", "architectures": [ "i386", "amd64" ] },
 	
 	"ubuntu/jammy":     { "distribution": "jammy",    "base-release": "0~ubuntu2204", "architectures": [ "amd64" ] },
