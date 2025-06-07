@@ -9,15 +9,14 @@ Each distro/release has a dedicated branch to allow for any necessary changes be
 Maintained releases:
 
 - debian/bookworm (Debian 12)
-- debian/bullseye (Debian 11)
 - ubuntu/plucky (Ubuntu 25.04)
 - ubuntu/oracular (Ubuntu 24.10)
 - ubuntu/noble (Ubuntu 24.04)
 - ubuntu/jammy (Ubuntu 22.04)
-- ubuntu/focal (Ubuntu 20.04)
 
 Obsolete releases:
 
+- debian/bullseye (Debian 11)
 - debian/buster (Debian 10)
 - debian/stretch (Debian 9)
 - ubuntu/mantic (Ubuntu 23.10)
@@ -26,6 +25,7 @@ Obsolete releases:
 - ubuntu/impish (Ubuntu 21.10)
 - ubuntu/hirsute (Ubuntu 21.04)
 - ubuntu/groovy (Ubuntu 20.10)
+- ubuntu/focal (Ubuntu 20.04)
 - ubuntu/eoan (Ubuntu 19.10)
 - ubuntu/bionic (Ubuntu 18.04)
 - ubuntu/xenial (Ubuntu 16.04)
