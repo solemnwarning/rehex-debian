@@ -1,5 +1,5 @@
 /* Reverse Engineer's Hex Editor
- * Copyright (C) 2017-2024 Daniel Collins <solemnwarning@solemnwarning.net>
+ * Copyright (C) 2017-2025 Daniel Collins <solemnwarning@solemnwarning.net>
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 as published by
@@ -45,6 +45,10 @@ IMPLEMENT_APP(REHex::App);
 
 bool REHex::App::OnInit()
 {
+	#ifdef REHEX_PROFILE
+	ProfilingCollector::set_thread_group(ProfilingCollector::ThreadGroup::MAIN);
+	#endif
+	
 	bulk_updates_freeze_count = 0;
 	quick_exit = false;
 	
@@ -225,17 +229,35 @@ bool REHex::App::OnInit()
 	/* Display default tool panels if a default view hasn't been configured. */
 	if(!config->HasGroup("/default-view/"))
 	{
-		config->SetPath("/default-view/vtools/panels/0/tab/0");
+		config->SetPath("/default-view/tools/right/0");
 		config->Write("name", "DecodePanel");
 		config->Write("selected", true);
 		config->Write("big-endian", false);
 		
-		config->SetPath("/default-view/vtools/panels/0/tab/1");
+		config->SetPath("/default-view/tools/right/1");
 		config->Write("name", "CommentTree");
 		config->Write("selected", false);
 	}
 	
+	/* Migrate open tools from the saved default view of rehex <0.63.0 */
+	
+	if(config->HasGroup("/default-view/htools/panels/0"))
+	{
+		config_copy(config, "/default-view/tools/bottom", *config, "/default-view/htools/panels/0/tab");
+		config->DeleteGroup("/default-view/htools/panels/0");
+	}
+	
+	if(config->HasGroup("/default-view/vtools/panels/0"))
+	{
+		config_copy(config, "/default-view/tools/right", *config, "/default-view/vtools/panels/0/tab");
+		config->DeleteGroup("/default-view/vtools/panels/0");
+	}
+	
+	#ifdef __APPLE__
+	recent_files = new MacFileHistory();
+	#else
 	recent_files = new wxFileHistory();
+	#endif
 	
 	config->SetPath("/recent-files/");
 	recent_files->Load(*config);
