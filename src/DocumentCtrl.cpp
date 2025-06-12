@@ -1,5 +1,5 @@
 /* Reverse Engineer's Hex Editor
- * Copyright (C) 2017-2024 Daniel Collins <solemnwarning@solemnwarning.net>
+ * Copyright (C) 2017-2025 Daniel Collins <solemnwarning@solemnwarning.net>
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 as published by
@@ -409,6 +409,23 @@ void REHex::DocumentCtrl::set_cursor_position(BitOffset position, Document::Curs
 	
 	/* TODO: Limit paint to affected area */
 	Refresh();
+}
+
+bool REHex::DocumentCtrl::check_cursor_position(BitOffset position)
+{
+	GenericDataRegion *last_dr = data_regions.back();
+	
+	if(_data_region_by_offset(position) == data_regions.end())
+	{
+		return false;
+	}
+	
+	if(!insert_mode && position > last_dr->d_offset && position == (last_dr->d_offset + last_dr->d_length))
+	{
+		return false;
+	}
+	
+	return true;
 }
 
 void REHex::DocumentCtrl::_set_cursor_position(BitOffset position, REHex::Document::CursorState cursor_state, bool preserve_cpos_hist)
@@ -879,7 +896,8 @@ void REHex::DocumentCtrl::_handle_width_change()
 				offset_column_width = hf_string_width(10 + 3);
 			}
 			else{
-				offset_column_width = hf_string_width(11 + 3);
+				int offWidth = snprintf(nullptr, 0, "%" PRId64, (int64_t)(end_virt_offset.byte()));
+				offset_column_width = hf_string_width(offWidth + 3);
 			}
 		}
 	}
@@ -946,11 +964,15 @@ void REHex::DocumentCtrl::_handle_width_change()
 		}
 	}
 
-	/* TODO: Preserve/scale the position as the window size changes. */
+	/* Clamp scroll X offset to (new) valid range. */
+	if(scroll_xoff > (virtual_width - client_width))
+	{
+		scroll_xoff = virtual_width - client_width;
+	}
 	
 	if((GetWindowStyle() & DCTRL_LOCK_SCROLL) == 0)
 	{
-		SetScrollbar(wxHORIZONTAL, 0, client_width, virtual_width);
+		SetScrollbar(wxHORIZONTAL, scroll_xoff, client_width, virtual_width);
 	}
 	else{
 		SetScrollbar(wxHORIZONTAL, 0, 0, 0);
@@ -1058,6 +1080,11 @@ void REHex::DocumentCtrl::_update_vscroll()
 		scroll_yoff_max = 0;
 	}
 	
+	{
+		ScrollUpdateEvent event(this, scroll_yoff, scroll_yoff_max, wxVERTICAL);
+		ProcessWindowEvent(event);
+	}
+	
 	linked_scroll_visit_others([this](DocumentCtrl *other)
 	{
 		other->scroll_yoff = scroll_yoff;
@@ -1074,6 +1101,11 @@ void REHex::DocumentCtrl::_update_vscroll()
 
 void REHex::DocumentCtrl::_update_vscroll_pos(bool update_linked_scroll_others)
 {
+	{
+		ScrollUpdateEvent event(this, scroll_yoff, scroll_yoff_max, wxVERTICAL);
+		ProcessWindowEvent(event);
+	}
+	
 	if((GetWindowStyle() & DCTRL_LOCK_SCROLL) != 0)
 	{
 		return;
@@ -1822,14 +1854,18 @@ void REHex::DocumentCtrl::OnLeftDown(wxMouseEvent &event)
 					mouse_shift_initial  = old_position;
 					mouse_down_at_offset = old_position;
 					mouse_down_at_x      = rel_x;
+					mouse_down_at_y      = mouse_y;
 					mouse_down_area      = clicked_area;
+					mouse_selecting      = true;
 				}
 				else{
 					clear_selection();
 					
 					mouse_down_at_offset = clicked_offset;
 					mouse_down_at_x      = rel_x;
+					mouse_down_at_y      = mouse_y;
 					mouse_down_area      = clicked_area;
+					mouse_selecting      = false;
 				}
 				
 				CaptureMouse();
@@ -2085,7 +2121,18 @@ void REHex::DocumentCtrl::OnMotionTick(int mouse_x, int mouse_y)
 		++region;
 	}
 	
-	if(region != regions.end())
+	if(!mouse_selecting)
+	{
+		int drag_x = wxSystemSettings::GetMetric(wxSYS_DRAG_X);
+		int drag_y = wxSystemSettings::GetMetric(wxSYS_DRAG_Y);
+		
+		if(abs((mouse_down_at_x - scroll_xoff) - mouse_x) > drag_x || abs(mouse_down_at_y - mouse_y) > drag_y)
+		{
+			mouse_selecting = true;
+		}
+	}
+	
+	if(region != regions.end() && mouse_selecting)
 	{
 		GenericDataRegion *dr = dynamic_cast<GenericDataRegion*>(*region);
 		CommentRegion *cr;
@@ -2233,6 +2280,12 @@ std::vector<REHex::DocumentCtrl::GenericDataRegion*>::iterator REHex::DocumentCt
 {
 	/* Find region that encompasses the given offset using binary search. */
 	
+	if(offset < BitOffset::ZERO)
+	{
+		/* Invalid offset. */
+		return data_regions.end();
+	}
+	
 	class StubRegion: public GenericDataRegion
 	{
 		public:
@@ -2254,6 +2307,7 @@ std::vector<REHex::DocumentCtrl::GenericDataRegion*>::iterator REHex::DocumentCt
 				virtual Rect calc_offset_bounds(BitOffset offset, DocumentCtrl *doc_ctrl) override { abort(); }
 				virtual ScreenArea screen_areas_at_offset(BitOffset offset, DocumentCtrl *doc_ctrl) override { abort(); }
 				
+				virtual std::pair<BitOffset, BitOffset> indent_offset_at_y(DocumentCtrl &doc_ctrl, int64_t y_lines_rel) override { abort(); }
 				virtual void calc_height(REHex::DocumentCtrl &doc) override { abort(); }
 				virtual void draw(REHex::DocumentCtrl &doc, wxDC &dc, int x, int64_t y) override { abort(); }
 				virtual wxCursor cursor_for_point(REHex::DocumentCtrl &doc, int x, int64_t y_lines, int y_px) override { abort(); }
@@ -2319,6 +2373,7 @@ std::vector<REHex::DocumentCtrl::GenericDataRegion*>::iterator REHex::DocumentCt
 				virtual Rect calc_offset_bounds(BitOffset offset, DocumentCtrl *doc_ctrl) override { abort(); }
 				virtual ScreenArea screen_areas_at_offset(BitOffset offset, DocumentCtrl *doc_ctrl) override { abort(); }
 				
+				virtual std::pair<BitOffset, BitOffset> indent_offset_at_y(DocumentCtrl &doc_ctrl, int64_t y_lines_rel) override { abort(); }
 				virtual void calc_height(REHex::DocumentCtrl &doc) override { abort(); }
 				virtual void draw(REHex::DocumentCtrl &doc, wxDC &dc, int x, int64_t y) override { abort(); }
 				virtual wxCursor cursor_for_point(REHex::DocumentCtrl &doc, int x, int64_t y_lines, int y_px) override { abort(); }
@@ -2372,6 +2427,11 @@ std::vector<REHex::DocumentCtrl::Region*>::iterator REHex::DocumentCtrl::region_
 				this->y_offset = y_offset;
 			}
 			
+			virtual std::pair<BitOffset, BitOffset> indent_offset_at_y(DocumentCtrl &doc_ctrl, int64_t y_lines_rel) override
+			{
+				abort();
+			}
+			
 			virtual void calc_height(REHex::DocumentCtrl &doc) override
 			{
 				abort();
@@ -2410,6 +2470,13 @@ std::vector<REHex::DocumentCtrl::Region*>::iterator REHex::DocumentCtrl::region_
 	assert(((*region)->y_offset + (*region)->y_lines) > y_offset || *region == regions.back());
 	
 	return region;
+}
+
+std::pair<REHex::BitOffset, REHex::BitOffset> REHex::DocumentCtrl::get_indent_offset_at_line(int64_t line)
+{
+	auto region = region_by_y_offset(line);
+	
+	return (*region)->indent_offset_at_y(*this, (line - (*region)->y_offset));
 }
 
 REHex::BitOffset REHex::DocumentCtrl::region_offset_cmp(BitOffset a, BitOffset b)
@@ -3250,6 +3317,21 @@ int64_t REHex::DocumentCtrl::get_scroll_yoff() const
 	return scroll_yoff;
 }
 
+int64_t REHex::DocumentCtrl::get_scroll_yoff_max() const
+{
+	return scroll_yoff_max;
+}
+
+unsigned int REHex::DocumentCtrl::get_visible_lines() const
+{
+	return visible_lines;
+}
+
+int64_t REHex::DocumentCtrl::get_total_lines() const
+{
+	return regions.empty() ? 0 : (regions.back()->y_offset + regions.back()->y_lines);
+}
+
 void REHex::DocumentCtrl::set_scroll_yoff(int64_t scroll_yoff, bool update_linked_scroll_others)
 {
 	set_scroll_yoff_clamped(scroll_yoff);
@@ -3451,6 +3533,14 @@ int REHex::DocumentCtrl::DataRegion::calc_width_for_bytes(DocumentCtrl &doc_ctrl
 		+ (doc_ctrl.show_ascii * doc_ctrl.hf_string_width(line_bytes));
 }
 
+std::pair<REHex::BitOffset, REHex::BitOffset> REHex::DocumentCtrl::GenericDataRegion::indent_offset_at_y(DocumentCtrl &doc_ctrl, int64_t y_lines_rel)
+{
+	BitOffset line_first_offset = nth_row_nearest_column(y_lines_rel, 0);
+	BitOffset line_last_offset = nth_row_nearest_column(y_lines_rel, INT_MAX);
+	
+	return std::make_pair((indent_offset + (line_first_offset - d_offset)), (indent_offset + (line_last_offset - d_offset)));
+}
+
 void REHex::DocumentCtrl::DataRegion::calc_height(REHex::DocumentCtrl &doc)
 {
 	int indent_width = doc.indent_width(indent_depth);
@@ -3580,10 +3670,10 @@ void REHex::DocumentCtrl::DataRegion::draw(REHex::DocumentCtrl &doc, wxDC &dc, i
 	hsm_pre = std::min<off_t>(hsm_pre, (d_offset + skip_bytes).byte()); /* Clamp to avoid offset going negative. */
 	
 	off_t hsm_post = std::max<off_t>(selection_data.size(), MAX_CHAR_SIZE);
+	off_t data_to_draw = std::min(max_bytes, (d_length.byte() - std::min(skip_bytes, d_length.byte())));
 	
 	try {
 		data_base = d_offset + BitOffset::BYTES(skip_bytes - hsm_pre);
-		off_t data_to_draw = std::min(max_bytes, (d_length.byte() - std::min(skip_bytes, d_length.byte())));
 		
 		data = doc.doc->read_data(data_base, data_to_draw + hsm_pre + hsm_post);
 		
@@ -3612,6 +3702,7 @@ void REHex::DocumentCtrl::DataRegion::draw(REHex::DocumentCtrl &doc, wxDC &dc, i
 		data.insert(data.end(), std::min(max_bytes, (d_length.byte() - std::min(skip_bytes, d_length.byte()))), '?');
 		data_err = true;
 		data_p = NULL;
+		data_remain = data_to_draw;
 	}
 	
 	/* The offset of the character in the Buffer currently being drawn. */
@@ -3640,7 +3731,7 @@ void REHex::DocumentCtrl::DataRegion::draw(REHex::DocumentCtrl &doc, wxDC &dc, i
 				BitOffset offset_within_data = offset - data_base;
 				assert(offset_within_data >= BitOffset::ZERO);
 				
-				if(offset_within_data.byte() < data.size())
+				if(offset_within_data.byte() < (off_t)(data.size()))
 				{
 					unsigned char byte = data[offset_within_data.byte()];
 					
@@ -3661,7 +3752,7 @@ void REHex::DocumentCtrl::DataRegion::draw(REHex::DocumentCtrl &doc, wxDC &dc, i
 		(*active_palette)[Palette::PAL_SELECTED_TEXT_FG],
 		(doc.hex_view_active()
 			? (*active_palette)[Palette::PAL_SELECTED_TEXT_BG]
-			: active_palette->get_average_colour(Palette::PAL_SELECTED_TEXT_BG, Palette::PAL_NORMAL_TEXT_BG)));
+			: active_palette->blend_colours(Palette::PAL_SELECTED_TEXT_BG, Palette::PAL_NORMAL_TEXT_BG)));
 	
 	bool selection_hidden = doc.is_selection_hidden();
 	
@@ -3680,7 +3771,7 @@ void REHex::DocumentCtrl::DataRegion::draw(REHex::DocumentCtrl &doc, wxDC &dc, i
 		(*active_palette)[Palette::PAL_SELECTED_TEXT_FG],
 		(doc.ascii_view_active()
 			? (*active_palette)[Palette::PAL_SELECTED_TEXT_BG]
-			: active_palette->get_average_colour(Palette::PAL_SELECTED_TEXT_BG, Palette::PAL_NORMAL_TEXT_BG)));
+			: active_palette->blend_colours(Palette::PAL_SELECTED_TEXT_BG, Palette::PAL_NORMAL_TEXT_BG)));
 	
 	auto ascii_highlight_func = [&](BitOffset offset)
 	{
@@ -4278,7 +4369,7 @@ void REHex::DocumentCtrl::Region::draw_ascii_line(DocumentCtrl *doc_ctrl, wxDC &
 		frf.fill_rectangle(char_bbox, bg_colour);
 	};
 	
-	for(size_t c = pad_bytes, i = 0; i < data_len; ++c, ++i)
+	for(size_t i = 0; i < data_len; ++i)
 	{
 		const void *c_data = (data != NULL) ? (const void*)(data + i)          : (const void*)("?");
 		size_t c_data_len  = (data != NULL) ? (data_len - i) + data_extra_post : 1;
@@ -4643,7 +4734,7 @@ REHex::BitOffset REHex::DocumentCtrl::DataRegion::offset_at_xy_hex(REHex::Docume
 {
 	if(mouse_x_px < hex_text_x)
 	{
-		return -1;
+		return BitOffset::INVALID;
 	}
 	
 	mouse_x_px -= hex_text_x;
@@ -4658,7 +4749,7 @@ REHex::BitOffset REHex::DocumentCtrl::DataRegion::offset_at_xy_hex(REHex::Docume
 	if(((char_offset + 1) % ((doc.bytes_per_group * 2) + 1)) == 0)
 	{
 		/* Click was over a space between byte groups. */
-		return -1;
+		return BitOffset::INVALID;
 	}
 	else{
 		unsigned int char_offset_sub_spaces = char_offset - (char_offset / ((doc.bytes_per_group * 2) + 1));
@@ -5181,6 +5272,8 @@ REHex::BitOffset REHex::DocumentCtrl::DataRegion::nth_row_nearest_column(int64_t
 	assert(row >= 0);
 	assert(row < y_lines);
 	
+	column = std::min<int>(column, ((bytes_per_line_actual * 2) - 1));
+	
 	BitOffset visual_offset = d_offset - BitOffset(first_line_pad_bytes, 0);
 	
 	BitOffset offset_at_col = visual_offset + BitOffset((column / 2), ((column % 2) * 4)) + BitOffset::BYTES((off_t)(row) * (off_t)(bytes_per_line_actual));
@@ -5382,6 +5475,11 @@ wxCursor REHex::DocumentCtrl::CommentRegion::cursor_for_point(REHex::DocumentCtr
 	else{
 		return wxNullCursor;
 	}
+}
+
+std::pair<REHex::BitOffset, REHex::BitOffset> REHex::DocumentCtrl::CommentRegion::indent_offset_at_y(DocumentCtrl &doc_ctrl, int64_t y_lines_rel)
+{
+	return std::make_pair(indent_offset, indent_offset);
 }
 
 std::pair<REHex::BitOffset, off_t> REHex::DocumentCtrl::DataRegion::get_char_at(BitOffset offset)

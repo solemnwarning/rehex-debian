@@ -1,5 +1,5 @@
 /* Reverse Engineer's Hex Editor
- * Copyright (C) 2022-2024 Daniel Collins <solemnwarning@solemnwarning.net>
+ * Copyright (C) 2022-2025 Daniel Collins <solemnwarning@solemnwarning.net>
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 as published by
@@ -53,6 +53,15 @@ REHex::RangeChoiceLinear::RangeChoiceLinear(wxWindow *parent, wxWindowID id, Sha
 	{
 		wxSize this_size = GetSizeFromTextSize(GetTextExtent(GetString(i)));
 		
+		/* GetSizeFromTextSize() isn't implemented on macOS, so handle that case and fall back to
+		 * using the system-provided "best" size as the target size.
+		*/
+		if(this_size.GetWidth() <= 0 || this_size.GetHeight() <= 0)
+		{
+			max_size = GetBestSize();
+			break;
+		}
+		
 		if(this_size.GetWidth() > max_size.GetWidth())
 		{
 			max_size.SetWidth(this_size.GetWidth());
@@ -86,6 +95,11 @@ REHex::RangeChoiceLinear::~RangeChoiceLinear()
 std::pair<REHex::BitOffset, REHex::BitOffset> REHex::RangeChoiceLinear::get_range() const
 {
 	return std::make_pair(current_offset, current_length);
+}
+
+bool REHex::RangeChoiceLinear::is_whole_file() const
+{
+	return GetSelection() == WHOLE_FILE;
 }
 
 void REHex::RangeChoiceLinear::set_whole_file()
