@@ -1,5 +1,5 @@
 /* Reverse Engineer's Hex Editor
- * Copyright (C) 2018-2024 Daniel Collins <solemnwarning@solemnwarning.net>
+ * Copyright (C) 2018-2025 Daniel Collins <solemnwarning@solemnwarning.net>
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 as published by
@@ -23,6 +23,7 @@
 #include <vector>
 #include <wx/clipbrd.h>
 #include <wx/filename.h>
+#include <wx/numformatter.h>
 #include <wx/utils.h>
 
 #include "App.hpp"
@@ -158,30 +159,66 @@ std::string REHex::format_offset(off_t offset, OffsetBase base, off_t upper_boun
 {
 	char fmt_out[24];
 	
-	if(upper_bound > 0xFFFFFFFF || offset > 0xFFFFFFFF)
+    if(base == OFFSET_BASE_HEX)
 	{
-		if(base == OFFSET_BASE_HEX)
-		{
+        if(upper_bound > 0xFFFFFFFF || offset > 0xFFFFFFFF)
+        {
 			snprintf(fmt_out, sizeof(fmt_out), "%08X:%08X",
 				(unsigned int)((offset & 0xFFFFFFFF00000000) >> 32),
 				(unsigned int)((offset & 0x00000000FFFFFFFF)));
-		}
-		else if(base == OFFSET_BASE_DEC)
-		{
-			snprintf(fmt_out, sizeof(fmt_out), "%019" PRId64, (int64_t)(offset));
-		}
-	}
-	else{
-		if(base == OFFSET_BASE_HEX)
-		{
+        }
+        else{
 			snprintf(fmt_out, sizeof(fmt_out), "%04X:%04X",
 				(unsigned int)((offset & 0xFFFF0000) >> 16),
 				(unsigned int)((offset & 0x0000FFFF)));
-		}
-		else if(base == OFFSET_BASE_DEC)
-		{
+        }
+	}
+
+    if(base == OFFSET_BASE_DEC)
+    {
+        if(upper_bound > 0xFFFFFFFF || offset > 0xFFFFFFFF)
+        {
+			snprintf(fmt_out, sizeof(fmt_out), "%019" PRId64, (int64_t)(offset));
+        }
+        else if(upper_bound > 999999999 || offset > 999999999)
+        {
 			snprintf(fmt_out, sizeof(fmt_out), "%010" PRId64, (int64_t)(offset));
-		}
+        }
+        else if(upper_bound > 99999999 || offset > 99999999)
+        {
+			snprintf(fmt_out, sizeof(fmt_out), "%09" PRId64, (int64_t)(offset));
+        }
+        else if(upper_bound > 9999999 || offset > 9999999)
+        {
+			snprintf(fmt_out, sizeof(fmt_out), "%08" PRId64, (int64_t)(offset));
+        }
+        else if(upper_bound > 999999 || offset > 999999)
+        {
+			snprintf(fmt_out, sizeof(fmt_out), "%07" PRId64, (int64_t)(offset));
+        }
+        else if(upper_bound > 99999 || offset > 99999)
+        {
+			snprintf(fmt_out, sizeof(fmt_out), "%06" PRId64, (int64_t)(offset));
+        }
+        else if(upper_bound > 9999 || offset > 9999)
+        {
+			snprintf(fmt_out, sizeof(fmt_out), "%05" PRId64, (int64_t)(offset));
+        }
+        else if(upper_bound > 999 || offset > 999)
+        {
+			snprintf(fmt_out, sizeof(fmt_out), "%04" PRId64, (int64_t)(offset));
+        }
+        else if(upper_bound > 99 || offset > 99)
+        {
+			snprintf(fmt_out, sizeof(fmt_out), "%03" PRId64, (int64_t)(offset));
+        }
+        else if(upper_bound > 9 || offset > 9)
+        {
+			snprintf(fmt_out, sizeof(fmt_out), "%02" PRId64, (int64_t)(offset));
+        }
+        else{
+			snprintf(fmt_out, sizeof(fmt_out), "%01" PRId64, (int64_t)(offset));
+        }
 	}
 	
 	return fmt_out;
@@ -197,6 +234,91 @@ std::string REHex::format_offset(BitOffset offset, OffsetBase base, BitOffset up
 	}
 	
 	return fmt_out;
+}
+
+std::string REHex::format_size(off_t size_bytes)
+{
+	return format_size(size_bytes, wxGetApp().settings->get_size_unit());
+}
+
+std::string REHex::format_size(off_t size_bytes, SizeUnit unit)
+{
+	const char *unit_sym = NULL;
+	off_t unit_div = 0;
+	
+	switch(unit)
+	{
+		case SizeUnit::B: B:
+			return (wxNumberFormatter::ToString(size_bytes) + " bytes").ToStdString();
+			
+		case SizeUnit::KiB: KiB:
+			unit_sym = "KiB";
+			unit_div = BYTES_PER_KiB;
+			break;
+			
+		case SizeUnit::MiB: MiB:
+			unit_sym = "MiB";
+			unit_div = BYTES_PER_MiB;
+			break;
+			
+		case SizeUnit::GiB: GiB:
+			unit_sym = "GiB";
+			unit_div = BYTES_PER_GiB;
+			break;
+			
+		case SizeUnit::TiB: TiB:
+			unit_sym = "TiB";
+			unit_div = BYTES_PER_TiB;
+			break;
+			
+		case SizeUnit::AUTO_XiB:
+			if(size_bytes >= BYTES_PER_TiB || size_bytes <= -BYTES_PER_TiB)       goto TiB;
+			else if(size_bytes >= BYTES_PER_GiB || size_bytes <= -BYTES_PER_GiB)  goto GiB;
+			else if(size_bytes >= BYTES_PER_MiB || size_bytes <= -BYTES_PER_MiB)  goto MiB;
+			else if(size_bytes >= BYTES_PER_KiB || size_bytes <= -BYTES_PER_KiB)  goto KiB;
+			else                                                                  goto B;
+			
+		case SizeUnit::kB: kB:
+			unit_sym = "kB";
+			unit_div = BYTES_PER_kB;
+			break;
+			
+		case SizeUnit::MB: MB:
+			unit_sym = "MB";
+			unit_div = BYTES_PER_MB;
+			break;
+			
+		case SizeUnit::GB: GB:
+			unit_sym = "GB";
+			unit_div = BYTES_PER_GB;
+			break;
+			
+		case SizeUnit::TB: TB:
+			unit_sym = "TB";
+			unit_div = BYTES_PER_TB;
+			break;
+			
+		case SizeUnit::AUTO_XB:
+			if(size_bytes >= BYTES_PER_TB || size_bytes <= -BYTES_PER_TB)       goto TB;
+			else if(size_bytes >= BYTES_PER_GB || size_bytes <= -BYTES_PER_GB)  goto GB;
+			else if(size_bytes >= BYTES_PER_MB || size_bytes <= -BYTES_PER_MB)  goto MB;
+			else if(size_bytes >= BYTES_PER_kB || size_bytes <= -BYTES_PER_kB)  goto kB;
+			else                                                                goto B;
+	};
+	
+	#if 0
+	snprintf(size_s, sizeof(size_s), "%zd.%02d %s",
+		(size_bytes / unit_div),
+		(int)(abs(((size_bytes % unit_div) * 100) / unit_div)),
+		unit_sym);
+	snprintf(size_s, sizeof(size_s), "%s%s%02d %s",
+		wxNumberFormatter::ToString(size_bytes / unit_div).mb_str().data(),
+		wxString(wxNumberFormatter::GetDecimalSeparator()).mb_str().data(),
+		(int)(abs(((size_bytes % unit_div) * 100) / unit_div)),
+		unit_sym);
+	#endif
+	
+	return (wxNumberFormatter::ToString(((double)(size_bytes) / (double)(unit_div)), 2) + " " + unit_sym).ToStdString();
 }
 
 void REHex::copy_from_doc(REHex::Document *doc, REHex::DocumentCtrl *doc_ctrl, wxWindow *dialog_parent, bool cut)
@@ -726,4 +848,128 @@ wxColour REHex::colour_from_string(const std::string &s)
 	int blue = strtol(bs, NULL, 16);
 	
 	return wxColour(red, green, blue);
+}
+
+REHex::Edge REHex::find_nearest_edge(const wxPoint &point, const wxRect &rect)
+{
+	int left_dist = abs(point.x - rect.GetLeft());
+	int right_dist = abs(point.x - rect.GetRight());
+	int top_dist = abs(point.y - rect.GetTop());
+	int bottom_dist = abs(point.y - rect.GetBottom());
+	
+	if(left_dist <= right_dist && left_dist <= top_dist && left_dist <= bottom_dist)
+	{
+		return Edge::LEFT;
+	}
+	else if(right_dist <= left_dist && right_dist <= top_dist && right_dist <= bottom_dist)
+	{
+		return Edge::RIGHT;
+	}
+	else if(top_dist <= left_dist && top_dist <= right_dist && top_dist <= bottom_dist)
+	{
+		return Edge::TOP;
+	}
+	else{
+		return Edge::BOTTOM;
+	}
+}
+
+bool REHex::recursive_mkdir(const std::string &path)
+{
+	wxFileName fn(path, wxEmptyString);
+	
+	if(fn.DirExists())
+	{
+		return true;
+	}
+	
+	fn.RemoveLastDir();
+	
+	return recursive_mkdir(fn.GetPath().ToStdString()) && wxMkdir(path);
+}
+
+void REHex::config_copy(wxConfig *dst, const wxString &dst_path, const wxConfig &src, const wxString &src_path)
+{
+	wxString dst_path_abs = dst_path.StartsWith("/") ? dst_path : (dst->GetPath() + "/" + dst_path);
+	wxString src_path_abs = src_path.StartsWith("/") ? src_path : (src.GetPath() + "/" + src_path);
+	
+	if(src.HasEntry(src_path))
+	{
+		wxConfigBase::EntryType type = src.GetEntryType(src_path);
+		
+		switch(type)
+		{
+			case wxConfigBase::EntryType::Type_String:
+			{
+				wxString value;
+				if(src.Read(src_path, &value))
+				{
+					dst->Write(dst_path_abs, value);
+				}
+				
+				break;
+			}
+			
+			case wxConfigBase::EntryType::Type_Boolean:
+			{
+				bool value;
+				if(src.Read(src_path, &value))
+				{
+					dst->Write(dst_path_abs, value);
+				}
+				
+				break;
+			}
+				
+			case wxConfigBase::EntryType::Type_Integer:
+			{
+				long value;
+				if(src.Read(src_path, &value))
+				{
+					dst->Write(dst_path_abs, value);
+				}
+				
+				break;
+			}
+			
+			case wxConfigBase::EntryType::Type_Float:
+			{
+				double value;
+				if(src.Read(src_path, &value))
+				{
+					dst->Write(dst_path_abs, value);
+				}
+				
+				break;
+			}
+			
+			default:
+				wxGetApp().printf_debug("Unknown entry type %d at %s in REHex::config_copy()\n",
+					(int)(type),
+					src_path_abs.ToStdString().c_str());
+				break;
+		}
+	}
+	else if(src.HasGroup(src_path))
+	{
+		wxConfigPathChanger src_scoped_path(&src, (src_path.EndsWith("/") ? src_path : (src_path + "/")));
+		
+		long iter;
+		wxString name;
+		bool cont;
+		
+		cont = src.GetFirstGroup(name, iter);
+		while(cont)
+		{
+			config_copy(dst, (dst_path_abs + "/" + name), src, name);
+			cont = src.GetNextGroup(name, iter);
+		}
+		
+		cont = src.GetFirstEntry(name, iter);
+		while(cont)
+		{
+			config_copy(dst, (dst_path_abs + "/" + name), src, name);
+			cont = src.GetNextEntry(name, iter);
+		}
+	}
 }
