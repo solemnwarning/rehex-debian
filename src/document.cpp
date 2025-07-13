@@ -1151,11 +1151,11 @@ int REHex::Document::allocate_highlight_colour(const wxString &label, const wxCo
 	}
 	
 	_tracked_change("change highlight colours",
-		[=, this]()
+		[this, primary_colour, secondary_colour, label, next_highlight_idx]()
 		{
 			auto new_colour_it = highlight_colour_map.add();
 			assert(new_colour_it != highlight_colour_map.end());
-			assert(new_colour_it->first == next_highlight_idx);
+			assert(new_colour_it->first == (size_t)(next_highlight_idx));
 			
 			new_colour_it->second.set_label(label);
 			if(primary_colour != wxNullColour) { new_colour_it->second.set_primary_colour(primary_colour); }
@@ -1244,6 +1244,40 @@ bool REHex::Document::set_data_type(BitOffset offset, BitOffset length, const st
 		[this, offset, length, type_info]()
 		{
 			types.set_range(offset, length, type_info);
+			_raise_types_changed();
+		},
+		
+		[]()
+		{
+			/* Data type changes are undone implicitly. */
+		});
+	
+	return true;
+}
+
+bool REHex::Document::set_data_type_bulk(std::vector<std::tuple<BitOffset, BitOffset, TypeInfo> > &&types)
+{
+	std::vector< std::pair<BitRangeMap<TypeInfo>::Range, TypeInfo> > types2;
+	types2.reserve(types.size());
+	
+	for(auto it = types.begin(); it != types.end(); ++it)
+	{
+		BitOffset offset = std::get<0>(*it);
+		BitOffset length = std::get<1>(*it);
+		const TypeInfo &ti = std::get<2>(*it);
+		
+		if(offset < BitOffset::ZERO || length <= BitOffset::ZERO || (offset + length).byte() > buffer_length())
+		{
+			return false;
+		}
+		
+		types2.emplace_back(BitRangeMap<TypeInfo>::Range(offset, length), ti);
+	}
+	
+	_tracked_change("set data type",
+		[this, types2]()
+		{
+			this->types.set_bulk(std::vector< std::pair<BitRangeMap<TypeInfo>::Range, TypeInfo> >(types2));
 			_raise_types_changed();
 		},
 		
@@ -2604,6 +2638,23 @@ REHex::Document::TypeInfo &REHex::Document::TypeInfo::operator=(const TypeInfo &
 	{
 		json_incref(options);
 	}
+	
+	return *this;
+}
+
+REHex::Document::TypeInfo::TypeInfo(TypeInfo &&typeinfo):
+	name(std::move(typeinfo.name)),
+	options(typeinfo.options)
+{
+	typeinfo.options = NULL;
+}
+
+REHex::Document::TypeInfo &REHex::Document::TypeInfo::operator=(TypeInfo &&rhs)
+{
+	name = std::move(rhs.name);
+	options = rhs.options;
+	
+	rhs.options = NULL;
 	
 	return *this;
 }

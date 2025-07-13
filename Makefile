@@ -27,6 +27,7 @@ BOTAN_PKG    ?= $(call pkg-select-ab,botan-3,botan-2)
 CAPSTONE_PKG ?= capstone
 JANSSON_PKG  ?= jansson
 LUA_PKG      ?= $(call pkg-select-ab,lua5.3,lua)
+JQ           ?= jq
 
 EXE ?= rehex
 EMBED_EXE ?= ./tools/embed
@@ -120,9 +121,9 @@ else
 	endif
 endif
 
-CFLAGS          := $(BASE_CFLAGS) -std=c99   -I. -Iinclude/ -IwxLua/modules/ -IwxFreeChart/include/                       -DREHEX_CACHE_CHARACTER_BITMAPS $(HELP_CFLAGS) $(BOTAN_CFLAGS) $(CAPSTONE_CFLAGS) $(JANSSON_CFLAGS) $(LUA_CFLAGS) $(CFLAGS)
-CXXFLAGS_NO_GTK := $(BASE_CFLAGS) $(CXXSTD) -I. -Iinclude/ -IwxLua/modules/ -IwxFreeChart/include/ -DwxOVERRIDE=override -DREHEX_CACHE_CHARACTER_BITMAPS $(HELP_CFLAGS) $(BOTAN_CFLAGS) $(CAPSTONE_CFLAGS) $(JANSSON_CFLAGS) $(LUA_CFLAGS) $(WX_CXXFLAGS) $(CXXFLAGS)
-CXXFLAGS        := $(BASE_CFLAGS) $(CXXSTD) -I. -Iinclude/ -IwxLua/modules/ -IwxFreeChart/include/ -DwxOVERRIDE=override -DREHEX_CACHE_CHARACTER_BITMAPS $(HELP_CFLAGS) $(BOTAN_CFLAGS) $(CAPSTONE_CFLAGS) $(JANSSON_CFLAGS) $(LUA_CFLAGS) $(WX_CXXFLAGS) $(GTK_CFLAGS) $(CXXFLAGS)
+CFLAGS          := $(BASE_CFLAGS) -std=c99   -I. -Iinclude/ -IwxLua/modules/ -IwxFreeChart/include/                       $(HELP_CFLAGS) $(BOTAN_CFLAGS) $(CAPSTONE_CFLAGS) $(JANSSON_CFLAGS) $(LUA_CFLAGS) $(CFLAGS)
+CXXFLAGS_NO_GTK := $(BASE_CFLAGS) $(CXXSTD) -I. -Iinclude/ -IwxLua/modules/ -IwxFreeChart/include/ -DwxOVERRIDE=override  $(HELP_CFLAGS) $(BOTAN_CFLAGS) $(CAPSTONE_CFLAGS) $(JANSSON_CFLAGS) $(LUA_CFLAGS) $(WX_CXXFLAGS) $(CXXFLAGS)
+CXXFLAGS        := $(BASE_CFLAGS) $(CXXSTD) -I. -Iinclude/ -IwxLua/modules/ -IwxFreeChart/include/ -DwxOVERRIDE=override  $(HELP_CFLAGS) $(BOTAN_CFLAGS) $(CAPSTONE_CFLAGS) $(JANSSON_CFLAGS) $(LUA_CFLAGS) $(WX_CXXFLAGS) $(GTK_CFLAGS) $(CXXFLAGS)
 
 uname_S := $(shell uname -s 2>/dev/null)
 ifeq ($(uname_S),FreeBSD)
@@ -137,7 +138,7 @@ LDLIBS := -lunistring $(WX_LIBS) $(GTK_LIBS) $(BOTAN_LIBS) $(CAPSTONE_LIBS) $(JA
 # Define this for releases
 # NOTE: This *MUST* be of the form a.b.c where each component is an integer to fit the format of
 # macOS version numbers and Windows version info resources.
-VERSION := 0.63.0
+VERSION := 0.63.1
 
 ifdef VERSION
 	LONG_VERSION := Version $(VERSION)
@@ -153,8 +154,8 @@ else
 	
 	GIT_COMMIT_TIME ?= $(call shell-or-die,git log -1 --format="%ct")
 	
-	VERSION      := 
-	LONG_VERSION := Snapshot 
+	VERSION      := 90b47646560ae8ce61dc13736f4c132310f6cb93
+	LONG_VERSION := Snapshot 90b47646560ae8ce61dc13736f4c132310f6cb93
 endif
 
 DEPDIR := .d
@@ -373,6 +374,7 @@ APP_OBJS := \
 	src/AppTestable.$(BUILD_TYPE).o \
 	src/ArtProvider.$(BUILD_TYPE).o \
 	src/BasicDataTypes.$(BUILD_TYPE).o \
+	src/BatchedCharacterRenderer.$(BUILD_TYPE).o \
 	src/BitArray.$(BUILD_TYPE).o \
 	src/BitEditor.$(BUILD_TYPE).o \
 	src/BitOffset.$(BUILD_TYPE).o \
@@ -412,6 +414,7 @@ APP_OBJS := \
 	src/FileWriter.$(BUILD_TYPE).o \
 	src/FillRangeDialog.$(BUILD_TYPE).o \
 	src/FixedSizeValueRegion.$(BUILD_TYPE).o \
+	src/FontCharacterCache.$(BUILD_TYPE).o \
 	src/GotoOffsetDialog.$(BUILD_TYPE).o \
 	src/HierarchicalByteAccumulator.$(BUILD_TYPE).o \
 	src/HighlightColourMap.$(BUILD_TYPE).o \
@@ -496,6 +499,7 @@ TEST_OBJS := \
 	src/AppTestable.$(BUILD_TYPE).o \
 	src/ArtProvider.$(BUILD_TYPE).o \
 	src/BasicDataTypes.$(BUILD_TYPE).o \
+	src/BatchedCharacterRenderer.$(BUILD_TYPE).o \
 	src/BitArray.$(BUILD_TYPE).o \
 	src/BitOffset.$(BUILD_TYPE).o \
 	src/BitmapTool.$(BUILD_TYPE).o \
@@ -527,6 +531,7 @@ TEST_OBJS := \
 	src/FileWriter.$(BUILD_TYPE).o \
 	src/FillRangeDialog.$(BUILD_TYPE).o \
 	src/FixedSizeValueRegion.$(BUILD_TYPE).o \
+	src/FontCharacterCache.$(BUILD_TYPE).o \
 	src/GotoOffsetDialog.$(BUILD_TYPE).o \
 	src/HierarchicalByteAccumulator.$(BUILD_TYPE).o \
 	src/HighlightColourMap.$(BUILD_TYPE).o \
@@ -560,57 +565,57 @@ TEST_OBJS := \
 	src/VirtualMappingDialog.$(BUILD_TYPE).o \
 	src/win32lib.$(BUILD_TYPE).o \
 	src/WindowCommands.$(BUILD_TYPE).o \
-	tests/BitmapTool.o \
-	tests/BitOffset.o \
-	tests/BufferTest1.o \
-	tests/BufferTest2.o \
-	tests/BufferTest3.o \
-	tests/ByteAccumulator.o \
-	tests/ByteColourMap.o \
-	tests/ByteRangeMap.o \
-	tests/ByteRangeSet.o \
-	tests/ByteRangeTree.o \
-	tests/CharacterEncoder.o \
-	tests/CharacterFinder.o \
-	tests/Checksum.o \
-	tests/CommentsDataObject.o \
-	tests/CommentTree.o \
-	tests/ConsoleBuffer.o \
-	tests/CustomNumericType.o \
-	tests/DataType.o \
-	tests/DataView.o \
-	tests/DataHistogramAccumulator.o \
-	tests/DiffWindow.o \
-	tests/DisassemblyRegion.o \
-	tests/Document.o \
-	tests/DocumentCtrl.o \
-	tests/endian_conv.o \
-	tests/FastRectangleFiller.o \
-	tests/FileWriter.o \
-	tests/HierarchicalByteAccumulator.o \
-	tests/HighlightColourMap.o \
-	tests/HSVColour.o \
-	tests/IntelHexExport.o \
-	tests/IntelHexImport.o \
-	tests/LuaPluginLoader.o \
-	tests/main.o \
-	tests/NestedOffsetLengthMap.o \
-	tests/NumericTextCtrl.o \
-	tests/MultiSplitter.o \
-	tests/Range.o \
-	tests/RangeProcessor.o \
-	tests/search-bseq.o \
-	tests/search-text.o \
-	tests/SearchBase.o \
-	tests/SearchValue.o \
-	tests/SafeWindowPointer.o \
-	tests/SharedDocumentPointer.o \
-	tests/StringPanel.o \
-	tests/Tab.o \
-	tests/testutil.o \
-	tests/ThreadPool.o \
-	tests/util.o \
-	tests/WindowCommands.o \
+	tests/BitmapTool.$(BUILD_TYPE).o \
+	tests/BitOffset.$(BUILD_TYPE).o \
+	tests/BufferTest1.$(BUILD_TYPE).o \
+	tests/BufferTest2.$(BUILD_TYPE).o \
+	tests/BufferTest3.$(BUILD_TYPE).o \
+	tests/ByteAccumulator.$(BUILD_TYPE).o \
+	tests/ByteColourMap.$(BUILD_TYPE).o \
+	tests/ByteRangeMap.$(BUILD_TYPE).o \
+	tests/ByteRangeSet.$(BUILD_TYPE).o \
+	tests/ByteRangeTree.$(BUILD_TYPE).o \
+	tests/CharacterEncoder.$(BUILD_TYPE).o \
+	tests/CharacterFinder.$(BUILD_TYPE).o \
+	tests/Checksum.$(BUILD_TYPE).o \
+	tests/CommentsDataObject.$(BUILD_TYPE).o \
+	tests/CommentTree.$(BUILD_TYPE).o \
+	tests/ConsoleBuffer.$(BUILD_TYPE).o \
+	tests/CustomNumericType.$(BUILD_TYPE).o \
+	tests/DataType.$(BUILD_TYPE).o \
+	tests/DataView.$(BUILD_TYPE).o \
+	tests/DataHistogramAccumulator.$(BUILD_TYPE).o \
+	tests/DiffWindow.$(BUILD_TYPE).o \
+	tests/DisassemblyRegion.$(BUILD_TYPE).o \
+	tests/Document.$(BUILD_TYPE).o \
+	tests/DocumentCtrl.$(BUILD_TYPE).o \
+	tests/endian_conv.$(BUILD_TYPE).o \
+	tests/FastRectangleFiller.$(BUILD_TYPE).o \
+	tests/FileWriter.$(BUILD_TYPE).o \
+	tests/HierarchicalByteAccumulator.$(BUILD_TYPE).o \
+	tests/HighlightColourMap.$(BUILD_TYPE).o \
+	tests/HSVColour.$(BUILD_TYPE).o \
+	tests/IntelHexExport.$(BUILD_TYPE).o \
+	tests/IntelHexImport.$(BUILD_TYPE).o \
+	tests/LuaPluginLoader.$(BUILD_TYPE).o \
+	tests/main.$(BUILD_TYPE).o \
+	tests/NestedOffsetLengthMap.$(BUILD_TYPE).o \
+	tests/NumericTextCtrl.$(BUILD_TYPE).o \
+	tests/MultiSplitter.$(BUILD_TYPE).o \
+	tests/Range.$(BUILD_TYPE).o \
+	tests/RangeProcessor.$(BUILD_TYPE).o \
+	tests/search-bseq.$(BUILD_TYPE).o \
+	tests/search-text.$(BUILD_TYPE).o \
+	tests/SearchBase.$(BUILD_TYPE).o \
+	tests/SearchValue.$(BUILD_TYPE).o \
+	tests/SafeWindowPointer.$(BUILD_TYPE).o \
+	tests/SharedDocumentPointer.$(BUILD_TYPE).o \
+	tests/StringPanel.$(BUILD_TYPE).o \
+	tests/Tab.$(BUILD_TYPE).o \
+	tests/testutil.$(BUILD_TYPE).o \
+	tests/ThreadPool.$(BUILD_TYPE).o \
+	tests/util.$(BUILD_TYPE).o \
+	tests/WindowCommands.$(BUILD_TYPE).o \
 	$(WXLUA_OBJS) \
 	$(WXBIND_OBJS) \
 	$(EXTRA_TEST_OBJS)
@@ -684,7 +689,7 @@ src/lua-plugin-preload.c src/lua-plugin-preload.h: src/lua-plugin-preload.done ;
 	$(CC) $(CFLAGS) $(DEPFLAGS) -c -o $@ $<
 	$(DEPPOST)
 
-tests/%.o: tests/%.cpp $(WXLUA_BINDINGS) $(GTKCONFIG_EXE)
+tests/%.$(BUILD_TYPE).o: tests/%.cpp $(WXLUA_BINDINGS) $(GTKCONFIG_EXE)
 	$(DEPPRE)
 	$(CXX) $(CXXFLAGS) -I./googletest/include/ $(DEPFLAGS) -c -o $@ $<
 	$(DEPPOST)
@@ -713,17 +718,17 @@ wxLua/%.cpp: $(WXLUA_BINDINGS)
 # The compile_commands.json fragment for each file is written out under .cc/ and then merged into
 # the top-level compile_commands.json, all are rebuilt when the Makefile(s) are changed.
 
-COMPILE_COMMAND_DEPENDENCIES := $(wildcard Makefile Makefile.*)
+COMPILE_COMMAND_DEPENDENCIES := $(wildcard Makefile Makefile.*) $(JQ)
 COMPILE_COMMAND_INTERMEDIATE_DIR := .cc
 
 .PHONY: compile_commands.json
 compile_commands.json: $(addprefix $(COMPILE_COMMAND_INTERMEDIATE_DIR)/,$(addsuffix .compile_command.json,$(APP_OBJS) $(TEST_OBJS)))
-	cat $^ | jq -s . > $@
+	cat $^ | $(JQ) -s . > $@
 
 # $(call emit-compile-command,$(COMPILE_COMMAND_INTERMEDIATE_DIR)/foo.o.compile_command.json,foo.c,$(CC) $(CFLAGS))
 define emit-compile-command
 	@mkdir -p $(dir $(1))
-	echo "{ \"directory\": $$(pwd | jq -R .), \"file\": $$(echo "$(patsubst $(COMPILE_COMMAND_INTERMEDIATE_DIR)/%,%,$(patsubst %.compile_command.json,%,$(2)))" | jq -R .), \"command\": $$(echo "$(3) -o $(2) $(patsubst $(COMPILE_COMMAND_INTERMEDIATE_DIR)/%,%,$(patsubst %.compile_command.json,%,$(2)))" | jq -R .) }" > $(1)
+	echo "{ \"directory\": $$(pwd | $(JQ) -R .), \"file\": $$(echo "$(patsubst $(COMPILE_COMMAND_INTERMEDIATE_DIR)/%,%,$(patsubst %.compile_command.json,%,$(2)))" | $(JQ) -R .), \"command\": $$(echo "$(3) -o $(2) $(patsubst $(COMPILE_COMMAND_INTERMEDIATE_DIR)/%,%,$(patsubst %.compile_command.json,%,$(2)))" | $(JQ) -R .) }" > $(1)
 endef
 
 $(COMPILE_COMMAND_INTERMEDIATE_DIR)/googletest/src/%.o.compile_command.json: googletest/src/%.cc $(GTKCONFIG_EXE) $(COMPILE_COMMAND_DEPENDENCIES)
@@ -746,6 +751,9 @@ $(COMPILE_COMMAND_INTERMEDIATE_DIR)/%.o.compile_command.json: %.cpp $(GTKCONFIG_
 
 $(COMPILE_COMMAND_INTERMEDIATE_DIR)/%.$(BUILD_TYPE).o.compile_command.json: %.cpp $(GTKCONFIG_EXE) $(COMPILE_COMMAND_DEPENDENCIES)
 	$(call emit-compile-command,$@,$<,$(CXX) $(CXXFLAGS))
+
+# Dummy rule for jq on platforms where we rely on a system-provided binary.
+jq:
 
 .PHONY: help/rehex.chm
 help/rehex.chm:
@@ -842,8 +850,8 @@ else
 	git ls-files | xargs cp --parents -t rehex-$(VERSION)/
 	
 	# Inline any references to the HEAD commit sha/timestamp
-	sed -i -e "s|\$||g" rehex-$(VERSION)/Makefile
-	sed -i -e "s|\$1749679646|1749679646|g" rehex-$(VERSION)/Makefile
+	sed -i -e "s|\$90b47646560ae8ce61dc13736f4c132310f6cb93|90b47646560ae8ce61dc13736f4c132310f6cb93|g" rehex-$(VERSION)/Makefile
+	sed -i -e "s|\$1752414722|1752414722|g" rehex-$(VERSION)/Makefile
 endif
 	
 	# Generate reproducible tarball. All files use git commit timestamp.
@@ -851,7 +859,7 @@ endif
 		LC_ALL=C sort -z | \
 		tar \
 			--format=ustar \
-			--mtime=@1749679646 \
+			--mtime=@1752414722 \
 			--owner=0 --group=0 --numeric-owner \
 			--no-recursion --null  -T - \
 			-cf - | \
