@@ -217,6 +217,7 @@ plugins/binary-template/preprocessor-tests/unmatched-ifdef-test.bt
 plugins/binary-template/preprocessor-tests/unmatched-ifndef-test.bt
 plugins/binary-template/preprocessor.lua
 plugins/binary-template/preprocessor_spec.lua
+plugins/binary-template/stable_sort.lua
 plugins/binary-template/templates/.gitignore
 plugins/binary-template/templates/riff.bt
 plugins/examples/window.lua
@@ -300,6 +301,8 @@ src/ArtProvider.cpp
 src/ArtProvider.hpp
 src/BasicDataTypes.cpp
 src/BasicDataTypes.hpp
+src/BatchedCharacterRenderer.cpp
+src/BatchedCharacterRenderer.hpp
 src/BitArray.cpp
 src/BitArray.hpp
 src/BitEditor.cpp
@@ -377,6 +380,8 @@ src/FillRangeDialog.cpp
 src/FillRangeDialog.hpp
 src/FixedSizeValueRegion.cpp
 src/FixedSizeValueRegion.hpp
+src/FontCharacterCache.cpp
+src/FontCharacterCache.hpp
 src/GotoOffsetDialog.cpp
 src/GotoOffsetDialog.hpp
 src/HSVColour.cpp

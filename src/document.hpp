@@ -120,8 +120,8 @@ namespace REHex {
 				TypeInfo(const TypeInfo &typeinfo);
 				TypeInfo &operator=(const TypeInfo &rhs);
 				
-				TypeInfo(TypeInfo &&typeinfo) = delete;
-				TypeInfo &operator=(TypeInfo &&rhs) = delete;
+				TypeInfo(TypeInfo &&typeinfo);
+				TypeInfo &operator=(TypeInfo &&rhs);
 				
 				~TypeInfo();
 				
@@ -314,6 +314,11 @@ namespace REHex {
 			 * current size of the file.
 			*/
 			bool set_data_type(BitOffset offset, BitOffset length, const std::string &type, const json_t *options = NULL);
+			
+			/**
+			 * @brief Set the data type for multiple ranges of bytes at once.
+			*/
+			bool set_data_type_bulk(std::vector<std::tuple<BitOffset, BitOffset, TypeInfo> > &&types);
 			
 			const CharacterEncoder *get_text_encoder(BitOffset offset) const;
 			
