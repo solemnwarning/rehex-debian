@@ -1,3 +1,9 @@
+rehex (0.63.2-0~debian12) bookworm; urgency=low
+
+  * Add missing file required for binary template support.
+
+ -- Daniel Collins <solemnwarning@solemnwarning.net>  Sun, 13 Jul 2025 15:57:01 +0100
+
 rehex (0.63.1-0~debian12) bookworm; urgency=low
 
   * Improve performance of templates that declare large numbers of file
