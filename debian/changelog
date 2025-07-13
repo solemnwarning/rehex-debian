@@ -1,3 +1,22 @@
+rehex (0.63.1-0~debian12) bookworm; urgency=low
+
+  * Improve performance of templates that declare large numbers of file
+    variables.
+
+  * Fix selecting the byte range encapsulated by a comment (#255).
+
+  * Add "Jump to end" command to comments panel context menu (#254).
+
+  * Improve rendering performance and UI responsiveness, particularly
+    when a large number of colours are in use (#257).
+
+  * Fix searching within a range.
+
+  * Default to selection when a range is selected prior to opening
+    search dialog (#256).
+
+ -- Daniel Collins <solemnwarning@solemnwarning.net>  Sun, 13 Jul 2025 15:22:01 +0100
+
 rehex (0.63.0-0~debian12) bookworm; urgency=low
 
   * Add non-modal "Jump to offset" dialog option (#242).
