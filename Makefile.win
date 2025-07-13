@@ -37,9 +37,6 @@ CXXFLAGS += -DIN_LIBUNISTRING
 CFLAGS   += -Iinclude/gcc-win-include/
 CXXFLAGS += -Iinclude/gcc-win-include/
 
-CFLAGS   += -DREHEX_CACHE_STRING_BITMAPS
-CXXFLAGS += -DREHEX_CACHE_STRING_BITMAPS
-
 CFLAGS   += -D_FILE_OFFSET_BITS=64
 CXXFLAGS += -D_FILE_OFFSET_BITS=64
 
@@ -69,7 +66,7 @@ ifeq ($(BUILD_TYPE),release)
 endif
 
 EXTRA_APP_BUILD_COMMAND += && windres $(VERSION_RES_DEFS) res/version-res.rc res/version-res.o
-EXTRA_APP_LINK_OBJS := res/version-res.o
+EXTRA_APP_LINK_OBJS := -mwindows res/version-res.o
 
 DISTDIR ?= rehex-$(VERSION)
 
@@ -77,6 +74,7 @@ windist: $(EXE) $(HELP_TARGET)
 	mkdir $(DISTDIR)
 	
 	cp $(EXE) $(DISTDIR)
+	strip $(DISTDIR)/$(EXE)
 	
 ifneq ($(BUILD_HELP),0)
 	cp rehex.chm $(DISTDIR)
