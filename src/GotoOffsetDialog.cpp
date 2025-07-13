@@ -54,27 +54,26 @@ int REHex::GotoOffsetDialog::ShowModal()
 
 REHex::NumericEntryDialog<REHex::BitOffset>::BaseHint REHex::GotoOffsetDialog::get_last_base()
 {
-	NumericEntryDialog<BitOffset>::BaseHint base;
 	switch(wxGetApp().settings->get_goto_offset_base())
 	{
 		case GotoOffsetBase::AUTO:
-			base = NumericEntryDialog<BitOffset>::BaseHint::AUTO;
-			break;
+			return NumericEntryDialog<BitOffset>::BaseHint::AUTO;
 		
 		case GotoOffsetBase::OCT:
-			base = NumericEntryDialog<BitOffset>::BaseHint::OCT;
-			break;
+			return NumericEntryDialog<BitOffset>::BaseHint::OCT;
 		
 		case GotoOffsetBase::DEC:
-			base = NumericEntryDialog<BitOffset>::BaseHint::DEC;
-			break;
+			return NumericEntryDialog<BitOffset>::BaseHint::DEC;
 		
 		case GotoOffsetBase::HEX:
-			base = NumericEntryDialog<BitOffset>::BaseHint::HEX;
-			break;
+			return NumericEntryDialog<BitOffset>::BaseHint::HEX;
 	}
 	
-	return base;
+	#if defined(__GNUC__)
+	__builtin_unreachable();
+	#elif defined(_MSC_VER)
+	__assume(false);
+	#endif
 }
 
 void REHex::GotoOffsetDialog::OnOK(wxCommandEvent &event)
