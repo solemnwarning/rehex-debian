@@ -1,4 +1,4 @@
-rehex (0.63.2-0~debian12) bookworm; urgency=low
+rehex (0.63.2-0~debian13) unreleased; urgency=low
 
   * Add missing file required for binary template support.
 
