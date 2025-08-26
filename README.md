@@ -8,17 +8,18 @@ Each distro/release has a dedicated branch to allow for any necessary changes be
 
 Maintained releases:
 
+- debian/trixie (Debian 13)
 - debian/bookworm (Debian 12)
-- debian/bullseye (Debian 11)
 - ubuntu/plucky (Ubuntu 25.04)
-- ubuntu/oracular (Ubuntu 24.10)
 - ubuntu/noble (Ubuntu 24.04)
 - ubuntu/jammy (Ubuntu 22.04)
 
 Obsolete releases:
 
+- debian/bullseye (Debian 11)
 - debian/buster (Debian 10)
 - debian/stretch (Debian 9)
+- ubuntu/oracular (Ubuntu 24.10)
 - ubuntu/mantic (Ubuntu 23.10)
 - ubuntu/lunar (Ubuntu 23.04)
 - ubuntu/kinetic (Ubuntu 22.10)
