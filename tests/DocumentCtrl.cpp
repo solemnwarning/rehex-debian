@@ -24,13 +24,14 @@
 #include "../src/document.hpp"
 #include "../src/DocumentCtrl.hpp"
 #include "../src/SharedDocumentPointer.hpp"
+#include "testutil.hpp"
 
 using namespace REHex;
 
 class DocumentCtrlTest: public ::testing::Test
 {
 	protected:
-		wxFrame frame;
+		AutoFrame frame;
 		
 		SharedDocumentPointer doc;
 		DocumentCtrl *doc_ctrl;
@@ -45,7 +46,7 @@ DocumentCtrlTest::DocumentCtrlTest():
 	frame(NULL, wxID_ANY, "REHex Tests"),
 	doc(SharedDocumentPointer::make())
 {
-	doc_ctrl = new DocumentCtrl(&frame, doc);
+	doc_ctrl = new DocumentCtrl(frame, doc);
 	
 	/* Need a data region to avoid crashing during wxEVT_SIZE handler. */
 	std::vector<DocumentCtrl::Region*> regions = { new DocumentCtrl::DataRegion(doc, 0, 0, 0) };
@@ -1550,7 +1551,7 @@ TEST_F(DocumentCtrlTest, RegionOffsetSubOutOfOrder)
 
 TEST_F(DocumentCtrlTest, RegionRangeLinear)
 {
-	std::vector<unsigned char> Z_DATA(256);
+	std::vector<unsigned char> Z_DATA(512);
 	doc->insert_data(0, Z_DATA.data(), Z_DATA.size());
 	
 	std::vector<DocumentCtrl::Region*> regions = {
@@ -1597,7 +1598,7 @@ TEST_F(DocumentCtrlTest, RegionRangeLinear)
 
 TEST_F(DocumentCtrlTest, GetSelectionRangesWithinRegion)
 {
-	std::vector<unsigned char> Z_DATA(256);
+	std::vector<unsigned char> Z_DATA(512);
 	doc->insert_data(0, Z_DATA.data(), Z_DATA.size());
 	
 	std::vector<DocumentCtrl::Region*> regions = {
@@ -1658,7 +1659,7 @@ TEST_F(DocumentCtrlTest, GetSelectionRangesWithinRegion)
 
 TEST_F(DocumentCtrlTest, GetSelectionRangesSpanningContiguousRegions)
 {
-	std::vector<unsigned char> Z_DATA(256);
+	std::vector<unsigned char> Z_DATA(512);
 	doc->insert_data(0, Z_DATA.data(), Z_DATA.size());
 	
 	std::vector<DocumentCtrl::Region*> regions = {
@@ -1698,7 +1699,7 @@ TEST_F(DocumentCtrlTest, GetSelectionRangesSpanningContiguousRegions)
 
 TEST_F(DocumentCtrlTest, GetSelectionRangesSpanningDiscontiguousRegions)
 {
-	std::vector<unsigned char> Z_DATA(256);
+	std::vector<unsigned char> Z_DATA(512);
 	doc->insert_data(0, Z_DATA.data(), Z_DATA.size());
 	
 	std::vector<DocumentCtrl::Region*> regions = {
@@ -1730,7 +1731,7 @@ TEST_F(DocumentCtrlTest, GetSelectionRangesSpanningDiscontiguousRegions)
 
 TEST_F(DocumentCtrlTest, GetSelectionRangesSpanningOutOfOrderRegions)
 {
-	std::vector<unsigned char> Z_DATA(256);
+	std::vector<unsigned char> Z_DATA(512);
 	doc->insert_data(0, Z_DATA.data(), Z_DATA.size());
 	
 	std::vector<DocumentCtrl::Region*> regions = {
@@ -1761,7 +1762,7 @@ TEST_F(DocumentCtrlTest, GetSelectionRangesSpanningOutOfOrderRegions)
 
 TEST_F(DocumentCtrlTest, GetSelectionRangesBitAligned)
 {
-	std::vector<unsigned char> Z_DATA(256);
+	std::vector<unsigned char> Z_DATA(512);
 	doc->insert_data(0, Z_DATA.data(), Z_DATA.size());
 	
 	std::vector<DocumentCtrl::Region*> regions = {
@@ -1798,7 +1799,7 @@ TEST_F(DocumentCtrlTest, GetSelectionRangesBitAligned)
 
 TEST_F(DocumentCtrlTest, RegionOffsetCompare)
 {
-	std::vector<unsigned char> Z_DATA(256);
+	std::vector<unsigned char> Z_DATA(512);
 	doc->insert_data(0, Z_DATA.data(), Z_DATA.size());
 	
 	std::vector<DocumentCtrl::Region*> regions = {
@@ -1835,7 +1836,7 @@ TEST_F(DocumentCtrlTest, RegionOffsetCompare)
 
 TEST_F(DocumentCtrlTest, GetSelectionInRegion)
 {
-	std::vector<unsigned char> Z_DATA(256);
+	std::vector<unsigned char> Z_DATA(512);
 	doc->insert_data(0, Z_DATA.data(), Z_DATA.size());
 	
 	DocumentCtrl::DataRegion *r1 = new DocumentCtrl::DataRegion(doc, 200, 50, 200);
@@ -1876,7 +1877,7 @@ TEST_F(DocumentCtrlTest, GetSelectionInRegion)
 
 TEST_F(DocumentCtrlTest, GetSelectionInRegionBitAligned)
 {
-	std::vector<unsigned char> Z_DATA(256);
+	std::vector<unsigned char> Z_DATA(512);
 	doc->insert_data(0, Z_DATA.data(), Z_DATA.size());
 	
 	DocumentCtrl::DataRegion *r1 = new DocumentCtrl::DataRegion(doc, 200, 50, 200);
