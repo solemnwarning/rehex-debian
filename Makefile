@@ -138,7 +138,7 @@ LDLIBS := -lunistring $(WX_LIBS) $(GTK_LIBS) $(BOTAN_LIBS) $(CAPSTONE_LIBS) $(JA
 # Define this for releases
 # NOTE: This *MUST* be of the form a.b.c where each component is an integer to fit the format of
 # macOS version numbers and Windows version info resources.
-VERSION := 0.63.2
+VERSION := 0.63.3
 
 ifdef VERSION
 	LONG_VERSION := Version $(VERSION)
@@ -154,8 +154,8 @@ else
 	
 	GIT_COMMIT_TIME ?= $(call shell-or-die,git log -1 --format="%ct")
 	
-	VERSION      := 8ea16a9885236f50554b619002807a7c941630a1
-	LONG_VERSION := Snapshot 8ea16a9885236f50554b619002807a7c941630a1
+	VERSION      := e317aae0272534a4631143819631a5cf7c1ee87d
+	LONG_VERSION := Snapshot e317aae0272534a4631143819631a5cf7c1ee87d
 endif
 
 DEPDIR := .d
@@ -338,11 +338,13 @@ WXFREECHART_OBJS := \
 	wxFreeChart/src/zoompan.$(BUILD_TYPE).o
 
 APP_OBJS := \
-	res/actual_size16.o \
+	res/actual_size_dark_16.o \
+	res/actual_size_light_16.o \
 	res/ascii16.o \
 	res/ascii24.o \
 	res/ascii32.o \
 	res/ascii48.o \
+	res/bg16.o \
 	res/diff_fold16.o \
 	res/diff_fold24.o \
 	res/diff_fold32.o \
@@ -351,7 +353,8 @@ APP_OBJS := \
 	res/dock_left.o \
 	res/dock_right.o \
 	res/dock_top.o \
-	res/fit_to_screen16.o \
+	res/fit_to_screen_dark_16.o \
+	res/fit_to_screen_light_16.o \
 	res/icon16.o \
 	res/icon32.o \
 	res/icon48.o \
@@ -364,10 +367,14 @@ APP_OBJS := \
 	res/offsets48.o \
 	res/shortcut48.o \
 	res/spinner24.o \
-	res/swap_horiz16.o \
-	res/swap_vert16.o \
-	res/zoom_in16.o \
-	res/zoom_out16.o \
+	res/swap_horiz_dark_16.o \
+	res/swap_horiz_light_16.o \
+	res/swap_vert_dark_16.o \
+	res/swap_vert_light_16.o \
+	res/zoom_in_dark_16.o \
+	res/zoom_in_light_16.o \
+	res/zoom_out_dark_16.o \
+	res/zoom_out_light_16.o \
 	src/AboutDialog.$(BUILD_TYPE).o \
 	src/AppMain.$(BUILD_TYPE).o \
 	src/AppSettings.$(BUILD_TYPE).o \
@@ -431,7 +438,9 @@ APP_OBJS := \
 	src/MultiSplitter.$(BUILD_TYPE).o \
 	src/Palette.$(BUILD_TYPE).o \
 	src/PopupTipWindow.$(BUILD_TYPE).o \
+	src/ProceduralBitmap.$(BUILD_TYPE).o \
 	src/profile.$(BUILD_TYPE).o \
+	src/ProxyDropTarget.$(BUILD_TYPE).o \
 	src/RangeChoiceLinear.$(BUILD_TYPE).o \
 	src/RangeDialog.$(BUILD_TYPE).o \
 	src/RangeProcessor.$(BUILD_TYPE).o \
@@ -464,11 +473,13 @@ $(DEFAULT_EXE_TARGET): $(APP_OBJS) $(GTKCONFIG_EXE)
 
 TEST_OBJS := \
 	googletest/src/gtest-all.o \
-	res/actual_size16.o \
+	res/actual_size_dark_16.o \
+	res/actual_size_light_16.o \
 	res/ascii16.o \
 	res/ascii24.o \
 	res/ascii32.o \
 	res/ascii48.o \
+	res/bg16.o \
 	res/diff_fold16.o \
 	res/diff_fold24.o \
 	res/diff_fold32.o \
@@ -477,7 +488,8 @@ TEST_OBJS := \
 	res/dock_left.o \
 	res/dock_right.o \
 	res/dock_top.o \
-	res/fit_to_screen16.o \
+	res/fit_to_screen_dark_16.o \
+	res/fit_to_screen_light_16.o \
 	res/icon16.o \
 	res/icon32.o \
 	res/icon48.o \
@@ -490,10 +502,14 @@ TEST_OBJS := \
 	res/offsets48.o \
 	res/shortcut48.o \
 	res/spinner24.o \
-	res/swap_horiz16.o \
-	res/swap_vert16.o \
-	res/zoom_in16.o \
-	res/zoom_out16.o \
+	res/swap_horiz_dark_16.o \
+	res/swap_horiz_light_16.o \
+	res/swap_vert_dark_16.o \
+	res/swap_vert_light_16.o \
+	res/zoom_in_dark_16.o \
+	res/zoom_in_light_16.o \
+	res/zoom_out_dark_16.o \
+	res/zoom_out_light_16.o \
 	src/AboutDialog.$(BUILD_TYPE).o \
 	src/AppSettings.$(BUILD_TYPE).o \
 	src/AppTestable.$(BUILD_TYPE).o \
@@ -547,6 +563,8 @@ TEST_OBJS := \
 	src/MultiSplitter.$(BUILD_TYPE).o \
 	src/Palette.$(BUILD_TYPE).o \
 	src/PopupTipWindow.$(BUILD_TYPE).o \
+	src/ProceduralBitmap.$(BUILD_TYPE).o \
+	src/ProxyDropTarget.$(BUILD_TYPE).o \
 	src/RangeDialog.$(BUILD_TYPE).o \
 	src/RangeProcessor.$(BUILD_TYPE).o \
 	src/search.$(BUILD_TYPE).o \
@@ -636,10 +654,15 @@ src/ArtProvider.$(BUILD_TYPE).o: \
 	res/diff_fold16.h res/diff_fold24.h res/diff_fold32.h res/diff_fold48.h \
 	res/offsets16.h res/offsets24.h res/offsets32.h res/offsets48.h
 src/BitmapTool.$(BUILD_TYPE).o: \
-	res/actual_size16.h res/fit_to_screen16.h res/swap_horiz16.h \
-	res/swap_vert16.h res/zoom_in16.h res/zoom_out16.h
+	res/actual_size_dark_16.h res/actual_size_light_16.h \
+	res/fit_to_screen_dark_16.h res/fit_to_screen_light_16.h \
+	res/swap_horiz_dark_16.h res/swap_horiz_light_16.h \
+	res/swap_vert_dark_16.h res/swap_vert_light_16.h \
+	res/zoom_in_dark_16.h res/zoom_in_light_16.h \
+	res/zoom_out_dark_16.h res/zoom_out_light_16.h \
+	res/bg16.h
 src/DataHistogramPanel.$(BUILD_TYPE).o: \
-	res/spinner24.h res/zoom_in16.h res/zoom_out16.h
+	res/spinner24.h res/zoom_in_dark_16.h res/zoom_in_light_16.h res/zoom_out_dark_16.h res/zoom_out_light_16.h
 src/DiffWindow.$(BUILD_TYPE).o: res/icon16.h res/icon32.h res/icon48.h res/icon64.h
 src/LicenseDialog.$(BUILD_TYPE).o: res/license.h
 src/LuaPluginLoader.$(BUILD_TYPE).o: src/lua-bindings/rehex_bind.h src/lua-plugin-preload.h
@@ -850,8 +873,8 @@ else
 	git ls-files | xargs cp --parents -t rehex-$(VERSION)/
 	
 	# Inline any references to the HEAD commit sha/timestamp
-	sed -i -e "s|\$8ea16a9885236f50554b619002807a7c941630a1|8ea16a9885236f50554b619002807a7c941630a1|g" rehex-$(VERSION)/Makefile
-	sed -i -e "s|\$1752418399|1752418399|g" rehex-$(VERSION)/Makefile
+	sed -i -e "s|\$e317aae0272534a4631143819631a5cf7c1ee87d|e317aae0272534a4631143819631a5cf7c1ee87d|g" rehex-$(VERSION)/Makefile
+	sed -i -e "s|\$1757363993|1757363993|g" rehex-$(VERSION)/Makefile
 endif
 	
 	# Generate reproducible tarball. All files use git commit timestamp.
@@ -859,7 +882,7 @@ endif
 		LC_ALL=C sort -z | \
 		tar \
 			--format=ustar \
-			--mtime=@1752418399 \
+			--mtime=@1757363993 \
 			--owner=0 --group=0 --numeric-owner \
 			--no-recursion --null  -T - \
 			-cf - | \
