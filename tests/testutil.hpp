@@ -23,6 +23,7 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
+#include <wx/frame.h>
 
 #ifdef _WIN32
 #define CONFIG_EOL "\r\n"
@@ -81,6 +82,49 @@ class AutoJSON
 		std::string serialise() const;
 		
 		bool operator==(const AutoJSON &rhs) const;
+};
+
+/**
+ * @brief Smart pointer for a wxFrame.
+ *
+ * NOTE: Calls wxWindow::Destroy() to trigger frame destruction "soon" rather than immediately
+ * destroying the owned object.
+*/
+class AutoFrame
+{
+	public:
+		wxFrame *frame;
+		
+		AutoFrame()
+		{
+			frame = new wxFrame();
+		}
+		
+		AutoFrame(wxWindow *parent, wxWindowID id, const wxString &title, const wxPoint &pos = wxDefaultPosition, const wxSize &size = wxDefaultSize, long style = wxDEFAULT_FRAME_STYLE, const wxString &name = wxFrameNameStr)
+		{
+			frame = new wxFrame(parent, id, title, pos, size, style, name);
+		}
+
+		AutoFrame(const AutoFrame&) = delete;
+		AutoFrame &operator=(const AutoFrame&) = delete;
+
+		AutoFrame(AutoFrame &&) = delete;
+		AutoFrame &operator=(AutoFrame&&) = delete;
+		
+		~AutoFrame()
+		{
+			frame->Destroy();
+		}
+		
+		operator wxFrame*()
+		{
+			return frame;
+		}
+		
+		wxFrame *operator->()
+		{
+			return frame;
+		}
 };
 
 /* Used by Google Test to print out JSON data. */
