@@ -20,15 +20,14 @@
 
 #include <wx/checkbox.h>
 #include <wx/choice.h>
-//#include <wx/statbmp.h>
-#include <wx/generic/statbmpg.h>
+#include <wx/sizer.h>
 #include <wx/spinctrl.h>
-#include <wx/timer.h>
 #include <wx/toolbar.h>
 
 #include "BitOffset.hpp"
 #include "document.hpp"
 #include "NumericTextCtrl.hpp"
+#include "ProceduralBitmap.hpp"
 #include "SafeWindowPointer.hpp"
 #include "SharedDocumentPointer.hpp"
 #include "ToolPanel.hpp"
@@ -59,7 +58,6 @@ namespace REHex {
 			};
 			
 			BitmapTool(wxWindow *parent, SharedDocumentPointer &document, DocumentCtrl *document_ctrl);
-			virtual ~BitmapTool();
 			
 			virtual std::string name() const override;
 			virtual std::string label() const override;
@@ -71,15 +69,26 @@ namespace REHex {
 			virtual wxSize DoGetBestClientSize() const override;
 			
 			void set_image_offset(BitOffset offset);
+			
 			void set_image_size(int width, int height);
+			wxSize get_image_size() const;
+			
 			void set_pixel_format(PixelFormat format);
-			void force_bitmap_size(int width, int height);
 			void set_flip_x(bool flip_x);
 			void set_flip_y(bool flip_y);
 			void set_row_length(int row_length);
 			
-			bool is_processing();
-			wxBitmap get_bitmap();
+			/**
+			 * @brief Render a portion of the image to a wxBitmap.
+			 *
+			 * @param bitmap      wxBitmap to render into.
+			 * @param image_rect  Rectangle from the image to render.
+			 * @param blend_bg    Blend pixels over existing bitmap.
+			 *
+			 * This method renders a rectangle of the selected image into a wxBitmap, scaling it if
+			 * the size of the bitmap doesn't match the rectangle size.
+			*/
+			template<typename PDT> void render_rect(wxBitmap *bitmap, const wxRect &image_rect, bool blend_bg);
 			
 		private:
 			SharedDocumentPointer document;
@@ -95,9 +104,26 @@ namespace REHex {
 			wxSpinCtrl *row_length_spinner;
 			wxToolBar *toolbar;
 			
-			wxBitmap *bitmap;
-			wxScrolledWindow *bitmap_scrollwin;
-			wxGenericStaticBitmap *s_bitmap;
+			class Preview: public ProceduralBitmap
+			{
+				private:
+					BitmapTool *m_parent;
+					wxColour m_bg;
+					
+				public:
+					Preview(BitmapTool *parent, const wxSize &size);
+					
+					void set_bg(const wxColour &bg);
+				
+				protected:
+					virtual wxBitmap render_rect(const wxRect &rect) override;
+					
+				private:
+					void fill_bg(wxBitmap *bitmap, int base_x, int base_y);
+			};
+			
+			Preview *m_preview;
+			wxBoxSizer *m_preview_sizer;
 			
 			BitOffset image_offset;
 			int image_width, image_height;
@@ -113,12 +139,7 @@ namespace REHex {
 			bool actual_size;
 			int zoom;
 			
-			int force_bitmap_width, force_bitmap_height;
 			int bitmap_width, bitmap_height;
-			
-			int bitmap_lines_per_idle;
-			int bitmap_update_line;
-			wxTimer update_timer;
 			
 			void document_unbind();
 			
@@ -127,7 +148,6 @@ namespace REHex {
 			void reset_row_length_spinner();
 			
 			void update();
-			void render_region(int region_y, int region_h, BitOffset offset, int width, int height);
 			
 			void OnDocumentDestroy(wxWindowDestroyEvent &event);
 			void OnCursorUpdate(CursorUpdateEvent &event);
@@ -142,10 +162,9 @@ namespace REHex {
 			void OnActualSize(wxCommandEvent &event);
 			void OnZoomIn(wxCommandEvent &event);
 			void OnZoomOut(wxCommandEvent &event);
+			void OnBackground(wxCommandEvent &event);
 			void OnXXX(wxCommandEvent &event);
 			void OnSize(wxSizeEvent &event);
-			void OnIdle(wxIdleEvent &event);
-			void OnUpdateTimer(wxTimerEvent &event);
 			void OnBitmapRightDown(wxMouseEvent &event);
 			
 			/* Stays at the bottom because it changes the protection... */
