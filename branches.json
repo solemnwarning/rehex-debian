@@ -4,5 +4,6 @@
 	
 	"ubuntu/jammy":     { "distribution": "jammy",    "base-release": "0~ubuntu2204", "architectures": [ "amd64" ] },
 	"ubuntu/noble":     { "distribution": "noble",    "base-release": "0~ubuntu2404", "architectures": [ "amd64" ] },
-	"ubuntu/plucky":    { "distribution": "plucky",   "base-release": "0~ubuntu2504", "architectures": [ "amd64" ] }
+	"ubuntu/plucky":    { "distribution": "plucky",   "base-release": "0~ubuntu2504", "architectures": [ "amd64" ] },
+	"ubuntu/questing":  { "distribution": "questing", "base-release": "0~ubuntu2510", "architectures": [ "amd64" ] }
 }

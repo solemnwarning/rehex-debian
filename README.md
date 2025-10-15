@@ -10,6 +10,7 @@ Maintained releases:
 
 - debian/trixie (Debian 13)
 - debian/bookworm (Debian 12)
+- ubuntu/questing (Ubuntu 25.10)
 - ubuntu/plucky (Ubuntu 25.04)
 - ubuntu/noble (Ubuntu 24.04)
 - ubuntu/jammy (Ubuntu 22.04)
