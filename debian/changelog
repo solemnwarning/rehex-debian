@@ -1,4 +1,4 @@
-rehex (0.63.3-0~ubuntu2504) plucky; urgency=low
+rehex (0.63.3-0~ubuntu2510) questing; urgency=low
 
   * Add option to change bitmap visualisation image background to a
     chosen colour (#258).
@@ -25,7 +25,7 @@ rehex (0.63.3-0~ubuntu2504) plucky; urgency=low
 
   * Update detached tool window title when tab is changed.
 
- -- Daniel Collins <solemnwarning@solemnwarning.net>  Mon, 08 Sep 2025 21:47:28 +0100
+ -- Daniel Collins <solemnwarning@solemnwarning.net>  Wed, 15 Oct 2025 23:03:18 +0100
 
 rehex (0.63.2-0~ubuntu2504) plucky; urgency=low
 
