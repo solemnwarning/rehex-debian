@@ -1,3 +1,14 @@
+rehex (0.63.4-0~debian12) bookworm; urgency=low
+
+  * Save selected value colour map in default view (#268).
+
+  * Fix blurry text/icons when using DPI scaling under moden Windows (#267).
+
+  * Fix crash when pressing enter in search for value and search for byte
+    sequence dialogs (#272).
+
+ -- Daniel Collins <solemnwarning@solemnwarning.net>  Sun, 23 Nov 2025 15:04:56 +0000
+
 rehex (0.63.3-0~debian12) bookworm; urgency=low
 
   * Add option to change bitmap visualisation image background to a
