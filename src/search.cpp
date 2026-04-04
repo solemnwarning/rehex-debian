@@ -30,6 +30,7 @@
 #include <wx/statbox.h>
 #include <wx/statline.h>
 
+#include "App.hpp"
 #include "CharacterEncoder.hpp"
 #include "NumericTextCtrl.hpp"
 #include "profile.hpp"
@@ -304,13 +305,6 @@ off_t REHex::Search::find_next(off_t from_offset, size_t window_size)
 	
 	begin_search(from_offset, range_end, SearchDirection::FORWARDS, window_size);
 	
-	/* Wait for the workers to finish searching. */
-	while(!threads.empty())
-	{
-		threads.back().join();
-		threads.pop_back();
-	}
-	
 	end_search();
 	
 	return match_found_at;
@@ -349,13 +343,9 @@ void REHex::Search::begin_search(off_t sub_range_begin, off_t sub_range_end, Sea
 	
 	search_direction = direction;
 	
-	/* Number of threads to spawn */
-	unsigned int thread_count = std::thread::hardware_concurrency();
-	
-	while(threads.size() < thread_count)
-	{
-		threads.emplace_back(&REHex::Search::thread_main, this, window_size, compare_size);
-	}
+	task = wxGetApp().thread_pool->queue_task([this, window_size, compare_size]() {
+		return task_func(window_size, compare_size);
+	}, -1);
 	
 	progress = new wxProgressDialog("Searching", "Search in progress...", 100, modal_parent, wxPD_CAN_ABORT | wxPD_REMAINING_TIME);
 	timer.Start(200, wxTIMER_CONTINUOUS);
@@ -367,11 +357,7 @@ void REHex::Search::end_search()
 	
 	running = false;
 	
-	while(!threads.empty())
-	{
-		threads.back().join();
-		threads.pop_back();
-	}
+	task.join();
 	
 	timer.Stop();
 	delete progress;
@@ -659,41 +645,34 @@ bool REHex::Search::read_base_window_controls()
 	return ok;
 }
 
-void REHex::Search::thread_main(size_t window_size, size_t compare_size)
+bool REHex::Search::task_func(size_t window_size, size_t compare_size)
 {
-	PROFILE_SET_THREAD_GROUP(NONE);
+	off_t window_begin, window_end;
+	off_t at, step;
 	
-	while(running && match_found_at < 0)
+	if(search_direction == SearchDirection::FORWARDS)
 	{
-		off_t window_begin, window_end;
-		off_t at, step;
+		window_begin = next_window_start.fetch_add(window_size);
+		window_end = std::min((off_t)(window_begin + window_size), search_end);
 		
-		if(search_direction == SearchDirection::FORWARDS)
+		at = window_begin;
+		if(((at - align_from) % align_to) != 0)
 		{
-			window_begin = next_window_start.fetch_add(window_size);
-			window_end = std::min((off_t)(window_begin + window_size), search_end);
-			
-			at = window_begin;
-			if(((at - align_from) % align_to) != 0)
-			{
-				at += (align_to - ((at - align_from) % align_to));
-			}
-			
-			step = align_to;
+			at += (align_to - ((at - align_from) % align_to));
 		}
-		else /* if(direction == SearchDirection::BACKWARDS) */
+		
+		step = align_to;
+	}
+	else /* if(direction == SearchDirection::BACKWARDS) */
+	{
+		window_begin = next_window_start.fetch_sub(window_size);
+		window_end = std::min((off_t)(window_begin + window_size), search_end);
+		
+		at = window_end - 1;
+		if(((at - align_from) % align_to) != 0)
 		{
-			window_begin = next_window_start.fetch_sub(window_size);
-			window_end = std::min((off_t)(window_begin + window_size), search_end);
-			
-			at = window_end - 1;
-			if(((at - align_from) % align_to) != 0)
-			{
-				at += (align_to - ((at - align_from) % align_to));
-				at -= align_to;
-			}
-			
-			step = -align_to;
+			at += (align_to - ((at - align_from) % align_to));
+			at -= align_to;
 		}
 		
 		step = -align_to;
@@ -717,18 +696,12 @@ void REHex::Search::thread_main(size_t window_size, size_t compare_size)
 		
 		size_t window_off = at - window_begin;
 		
-		if(window_begin < search_base)
+		for(; at >= window_begin && at < window_end && window_off < window.size(); at += step, window_off += step)
 		{
-			window_begin = search_base;
-		}
-		
-		try {
-			off_t read_size = std::min(((window_end - window_begin) + (off_t)(compare_size)), (search_end - window_begin));
-			std::vector<unsigned char> window = doc->read_data(window_begin, read_size);
+			size_t window_avail = window.size() - window_off;
+			assert(window_avail > 0);
 			
-			size_t window_off = at - window_begin;
-			
-			for(; at >= window_begin && at < window_end && window_off < window.size(); at += step, window_off += step)
+			if(test((window.data() + window_off), window_avail))
 			{
 				if(m_find_multiple)
 				{
@@ -746,10 +719,6 @@ void REHex::Search::thread_main(size_t window_size, size_t compare_size)
 					}
 				}
 			}
-		}
-		catch(const std::exception &e)
-		{
-			fprintf(stderr, "Exception in REHex::Search::thread_main: %s\n", e.what());
 		}
 	}
 	catch(const std::exception &e)

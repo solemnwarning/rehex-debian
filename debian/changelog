@@ -1,3 +1,9 @@
+rehex (0.64.0-0~debian13+1) trixie; urgency=low
+
+  * Fix bad merge.
+
+ -- Daniel Collins <solemnwarning@solemnwarning.net>  Sat, 04 Apr 2026 11:01:54 +0100
+
 rehex (0.64.0-0~debian13) trixie; urgency=low
 
   * Update Lua plugin integration to support Lua 5.5.
