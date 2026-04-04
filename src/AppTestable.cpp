@@ -1,5 +1,5 @@
 /* Reverse Engineer's Hex Editor
- * Copyright (C) 2017-2025 Daniel Collins <solemnwarning@solemnwarning.net>
+ * Copyright (C) 2017-2026 Daniel Collins <solemnwarning@solemnwarning.net>
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 as published by
@@ -23,12 +23,19 @@
 #include <wx/filename.h>
 #include <wx/font.h>
 #include <wx/stdpaths.h>
+#include <wx/sysopt.h>
 #include <wx/version.h>
 
 #include "App.hpp"
 #include "Events.hpp"
 #include "mainwindow.hpp"
 #include "../res/version.h"
+
+REHex::App::App()
+{
+	/* Ask wxWidgets to kindly not swallow any uncaught exceptions. */
+	wxSystemOptions::SetOption("catch-unhandled-exceptions", false);
+}
 
 const std::string &REHex::App::get_last_directory()
 {
@@ -470,7 +477,7 @@ int REHex::App::get_caret_off_time_ms()
 }
 #endif
 
-#ifdef __APPLE__
+#ifdef __WXOSX__
 void REHex::App::MacOpenFiles(const wxArrayString &filenames)
 {
 	size_t n_files = filenames.GetCount();

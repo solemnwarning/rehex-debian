@@ -1,5 +1,5 @@
 /* Reverse Engineer's Hex Editor
- * Copyright (C) 2022-2025 Daniel Collins <solemnwarning@solemnwarning.net>
+ * Copyright (C) 2022-2026 Daniel Collins <solemnwarning@solemnwarning.net>
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 as published by
@@ -34,38 +34,76 @@ REHex::AppSettings::AppSettings():
 	cursor_nav_mode(CursorNavMode::BYTE),
 	goto_offset_modal(true),
 	size_unit(SizeUnit::AUTO_XiB)
+	#ifdef REHEX_ENABLE_PRIMARY_SELECTION
+	, primary_copy_limit(DEFAULT_PRIMARY_COPY_LIMIT)
+	#endif
 {
 	ByteColourMap bcm_types;
 	bcm_types.set_label("ASCII Values");
 	
-	bcm_types.set_colour(0x00, ByteColourMap::Colour(Palette::PAL_CONTRAST_TEXT_1_FG));
-	bcm_types.set_colour_range(0x01, 0x1F, ByteColourMap::Colour(Palette::PAL_CONTRAST_TEXT_2_FG));
-	bcm_types.set_colour_range(0x20, 0x7E, ByteColourMap::Colour(Palette::PAL_CONTRAST_TEXT_5_FG));
-	bcm_types.set_colour(0x7F, ByteColourMap::Colour(Palette::PAL_CONTRAST_TEXT_2_FG));
+	bcm_types.set_colour(0x00, ByteColourMap::Colour(Palette::PAL_CONTRAST_TEXT_6_FG));
+	bcm_types.set_colour_range(0x01, 0x20, ByteColourMap::Colour(Palette::PAL_CONTRAST_TEXT_3_FG));
+	bcm_types.set_colour_range(0x21, 0x7F, ByteColourMap::Colour(Palette::PAL_CONTRAST_TEXT_2_FG));
 	
 	byte_colour_maps[1] = std::make_shared<ByteColourMap>(bcm_types);
 	
 	ByteColourMap bcm_gradient1;
-	bcm_gradient1.set_label("Gradient 1");
+	bcm_gradient1.set_label("Red / Green");
 	
-	bcm_gradient1.set_colour_gradient(0x00, 0xFF,
-		ByteColourMap::Colour(Palette::PAL_NORMAL_TEXT_FG),
-		ByteColourMap::Colour(Palette::PAL_CONTRAST_TEXT_1_FG));
+	bcm_gradient1.set_colour(0x00, Palette::PAL_CONTRAST_TEXT_6_FG);
+	
+	bcm_gradient1.set_colour_gradient(0x01, 0x7F,
+		ByteColourMap::Colour(Palette::PAL_CONTRAST_TEXT_1_FG),
+		ByteColourMap::Colour(Palette::PAL_CONTRAST_TEXT_5_FG));
+	
+	bcm_gradient1.set_colour_gradient(0x80, 0xFF,
+		ByteColourMap::Colour(Palette::PAL_CONTRAST_TEXT_5_FG),
+		ByteColourMap::Colour(Palette::PAL_CONTRAST_TEXT_3_FG));
 	
 	byte_colour_maps[2] = std::make_shared<ByteColourMap>(bcm_gradient1);
 	
 	ByteColourMap bcm_gradient2;
-	bcm_gradient2.set_label("Gradient 2");
+	bcm_gradient2.set_label("Blue / Red");
 	
-	bcm_gradient2.set_colour_gradient(0x00, 0x7E,
+	bcm_gradient2.set_colour(0x00, Palette::PAL_CONTRAST_TEXT_6_FG);
+	
+	bcm_gradient2.set_colour_gradient(0x01, 0x7F,
 		ByteColourMap::Colour(Palette::PAL_CONTRAST_TEXT_2_FG),
 		ByteColourMap::Colour(Palette::PAL_CONTRAST_TEXT_4_FG));
 	
-	bcm_gradient2.set_colour_gradient(0x7F, 0xFF,
+	bcm_gradient2.set_colour_gradient(0x80, 0xFF,
 		ByteColourMap::Colour(Palette::PAL_CONTRAST_TEXT_4_FG),
 		ByteColourMap::Colour(Palette::PAL_CONTRAST_TEXT_1_FG));
 	
 	byte_colour_maps[3] = std::make_shared<ByteColourMap>(bcm_gradient2);
+	
+	/* "Rainbow" colour map based on colours chosen by Alice Pellerin:
+	 * https://simonomi.dev/blog/color-code-your-bytes/
+	*/
+	
+	ByteColourMap bcm_rainbow;
+	bcm_rainbow.set_label("Rainbow");
+	
+	bcm_rainbow.set_colour(0x00,
+		ByteColourMap::Colour(Palette::PAL_CONTRAST_TEXT_6_FG));
+	
+	bcm_rainbow.set_colour_gradient(0x01, 0x3F,
+		ByteColourMap::Colour(Palette::PAL_CONTRAST_TEXT_1_FG),
+		ByteColourMap::Colour(Palette::PAL_CONTRAST_TEXT_5_FG));
+	
+	bcm_rainbow.set_colour_gradient(0x40, 0x7F,
+		ByteColourMap::Colour(Palette::PAL_CONTRAST_TEXT_5_FG),
+		ByteColourMap::Colour(Palette::PAL_CONTRAST_TEXT_3_FG));
+	
+	bcm_rainbow.set_colour_gradient(0x80, 0xCF,
+		ByteColourMap::Colour(Palette::PAL_CONTRAST_TEXT_3_FG),
+		ByteColourMap::Colour(Palette::PAL_CONTRAST_TEXT_2_FG));
+	
+	bcm_rainbow.set_colour_gradient(0xD0, 0xFE,
+		ByteColourMap::Colour(Palette::PAL_CONTRAST_TEXT_2_FG),
+		ByteColourMap::Colour(Palette::PAL_CONTRAST_TEXT_4_FG));
+	
+	byte_colour_maps[4] = std::make_shared<ByteColourMap>(bcm_rainbow);
 	
 #if 0
 	ByteColourMap bcm_colour_test;
@@ -200,6 +238,10 @@ REHex::AppSettings::AppSettings(wxConfig *config): AppSettings()
 			break;
 	}
 	
+	#ifdef REHEX_ENABLE_PRIMARY_SELECTION
+	primary_copy_limit = config->ReadLong("primary-copy-limit", primary_copy_limit);
+	#endif
+	
 	wxGetApp().Bind(PALETTE_CHANGED, &REHex::AppSettings::OnColourPaletteChanged, this);
 }
 
@@ -249,6 +291,10 @@ void REHex::AppSettings::write(wxConfig *config)
 	
 	config->Write("goto-offset-modal", goto_offset_modal);
 	config->Write("size-unit", (long)(size_unit));
+	
+	#ifdef REHEX_ENABLE_PRIMARY_SELECTION
+	config->Write("primary-copy-limit", (long)(primary_copy_limit));
+	#endif
 }
 
 REHex::AsmSyntax REHex::AppSettings::get_preferred_asm_syntax() const
@@ -403,6 +449,18 @@ void REHex::AppSettings::set_size_unit(SizeUnit unit)
 {
 	size_unit = unit;
 }
+
+#ifdef REHEX_ENABLE_PRIMARY_SELECTION
+size_t REHex::AppSettings::get_primary_copy_limit() const
+{
+	return primary_copy_limit;
+}
+
+void REHex::AppSettings::set_primary_copy_limit(size_t primary_copy_limit)
+{
+	this->primary_copy_limit = primary_copy_limit;
+}
+#endif
 
 void REHex::AppSettings::OnColourPaletteChanged(wxCommandEvent &event)
 {

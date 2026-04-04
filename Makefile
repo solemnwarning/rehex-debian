@@ -1,5 +1,5 @@
 # Reverse Engineer's Hex Editor
-# Copyright (C) 2017-2024 Daniel Collins <solemnwarning@solemnwarning.net>
+# Copyright (C) 2017-2026 Daniel Collins <solemnwarning@solemnwarning.net>
 #
 # This program is free software; you can redistribute it and/or modify it
 # under the terms of the GNU General Public License version 2 as published by
@@ -20,6 +20,22 @@ pkg-select-ab = $\
 	$(if $(filter yes,$(shell pkg-config --exists $(1) && echo yes)),$(1),$\
 		$(if $(filter yes,$(shell pkg-config --exists $(2) && echo yes)),$(2),$\
 			$(error Could not find $(1) or $(2) using pkg-config)))
+
+# Check if additional compile/link flags are required to compile a test program on top of the
+# general flags used to compile the application. Returns empty string it the additional flags
+# weren't required to build the program or the provided flags if they were.
+#
+# Usage: $(call config-test-flag,tools/config-test-xxx.cpp,-lfoo)
+#
+config-test-flag = $\
+	$(if $(wildcard $(1).aok)$(wildcard $(1).bok),$\
+		$(if $(wildcard $(1).aok),,$(if $(wildcard $(1).bok),$(2),)),$\
+		$(info Checking if we need $(2)...)$\
+		$(if $(shell $(CXX) $(CXXFLAGS_NO_GTK) -o $(1).aok $(1) $(LDFLAGS) $(LDLIBS_NO_GTK) > /dev/null 2>&1 && echo yes),$\
+			$(info No),$\
+			$(if $(shell $(CXX) $(CXXFLAGS_NO_GTK) -o $(1).bok $(1) $(LDFLAGS) $(LDLIBS_NO_GTK) $(2) > /dev/null 2>&1 && echo yes),$\
+				$(info Yes)$(2),$\
+				$(shell $(CXX) $(CXXFLAGS_NO_GTK) -o $(1).aok $(1) $(LDFLAGS) $(LDLIBS_NO_GTK) 1>&2)$(error Unable to compile $(1)))))
 
 LUA          ?= lua
 WX_CONFIG    ?= wx-config
@@ -125,20 +141,23 @@ CFLAGS          := $(BASE_CFLAGS) -std=c99   -I. -Iinclude/ -IwxLua/modules/ -Iw
 CXXFLAGS_NO_GTK := $(BASE_CFLAGS) $(CXXSTD) -I. -Iinclude/ -IwxLua/modules/ -IwxFreeChart/include/ -DwxOVERRIDE=override  $(HELP_CFLAGS) $(BOTAN_CFLAGS) $(CAPSTONE_CFLAGS) $(JANSSON_CFLAGS) $(LUA_CFLAGS) $(WX_CXXFLAGS) $(CXXFLAGS)
 CXXFLAGS        := $(BASE_CFLAGS) $(CXXSTD) -I. -Iinclude/ -IwxLua/modules/ -IwxFreeChart/include/ -DwxOVERRIDE=override  $(HELP_CFLAGS) $(BOTAN_CFLAGS) $(CAPSTONE_CFLAGS) $(JANSSON_CFLAGS) $(LUA_CFLAGS) $(WX_CXXFLAGS) $(GTK_CFLAGS) $(CXXFLAGS)
 
-uname_S := $(shell uname -s 2>/dev/null)
-ifeq ($(uname_S),FreeBSD)
-	LDLIBS += -liconv
-endif
-ifeq ($(uname_S),OpenBSD)
-	LDLIBS += -liconv
+LDLIBS_NO_GTK := -lunistring $(WX_LIBS)             $(BOTAN_LIBS) $(CAPSTONE_LIBS) $(JANSSON_LIBS) $(LUA_LIBS) $(LDLIBS)
+LDLIBS        := -lunistring $(WX_LIBS) $(GTK_LIBS) $(BOTAN_LIBS) $(CAPSTONE_LIBS) $(JANSSON_LIBS) $(LUA_LIBS) $(LDLIBS)
+
+# Check if we need to link -latomic for std::atomic support routines.
+ifeq ($(need_compiler_flags),1)
+	LDLIBS += $(call config-test-flag,tools/config-test-atomic.cpp,-latomic)
 endif
 
-LDLIBS := -lunistring $(WX_LIBS) $(GTK_LIBS) $(BOTAN_LIBS) $(CAPSTONE_LIBS) $(JANSSON_LIBS) $(LUA_LIBS) $(LDLIBS)
+# Check if we need to link -liconv for iconv functions.
+ifeq ($(need_compiler_flags),1)
+	LDLIBS += $(call config-test-flag,tools/config-test-iconv.cpp,-liconv)
+endif
 
 # Define this for releases
 # NOTE: This *MUST* be of the form a.b.c where each component is an integer to fit the format of
 # macOS version numbers and Windows version info resources.
-VERSION := 0.63.4
+VERSION := 0.64.0
 
 ifdef VERSION
 	LONG_VERSION := Version $(VERSION)
@@ -154,8 +173,8 @@ else
 	
 	GIT_COMMIT_TIME ?= $(call shell-or-die,git log -1 --format="%ct")
 	
-	VERSION      := 850f8d79d8c8b3a87be5ebbdc9abf1b214bd5e3f
-	LONG_VERSION := Snapshot 850f8d79d8c8b3a87be5ebbdc9abf1b214bd5e3f
+	VERSION      := 8bdbdc59950d92fb750d21e1ad486a9e54fc0295
+	LONG_VERSION := Snapshot 8bdbdc59950d92fb750d21e1ad486a9e54fc0295
 endif
 
 DEPDIR := .d
@@ -185,10 +204,13 @@ check: $(TEST_EXE)
 
 .PHONY: clean
 clean:
-	rm -f res/ascii16.c   res/ascii16.h \
+	rm -f res/actual_size_dark_16.c  res/actual_size_dark_16.h \
+	      res/actual_size_light_16.c res/actual_size_light_16.h \
+	      res/ascii16.c   res/ascii16.h \
 	      res/ascii24.c   res/ascii24.h \
 	      res/ascii32.c   res/ascii32.h \
 	      res/ascii48.c   res/ascii48.h \
+	      res/bg16.c res/bg16.h \
 	      res/diff_fold16.c res/diff_fold16.h \
 	      res/diff_fold24.c res/diff_fold24.h \
 	      res/diff_fold32.c res/diff_fold32.h \
@@ -197,6 +219,8 @@ clean:
 	      res/dock_left.c   res/dock_left.h \
 	      res/dock_right.c  res/dock_right.h \
 	      res/dock_top.c    res/dock_top.h \
+	      res/fit_to_screen_dark_16.c  res/fit_to_screen_dark_16.h \
+	      res/fit_to_screen_light_16.c res/fit_to_screen_light_16.h \
 	      res/icon16.c    res/icon16.h \
 	      res/icon32.c    res/icon32.h \
 	      res/icon48.c    res/icon48.h \
@@ -208,7 +232,16 @@ clean:
 	      res/offsets32.c res/offsets32.h \
 	      res/offsets48.c res/offsets48.h \
 	      res/shortcut48.c  res/shortcut48.h \
-	      res/spinner24.c   res/spinner24.h
+	      res/spinner24.c   res/spinner24.h \
+	      res/swap_horiz_dark_16.c   res/swap_horiz_dark_16.h \
+	      res/swap_horiz_light_16.c  res/swap_horiz_light_16.h \
+	      res/swap_vert_dark_16.c    res/swap_vert_dark_16.h \
+	      res/swap_vert_light_16.c   res/swap_vert_light_16.h \
+	      res/zoom_in_dark_16.c    res/zoom_in_dark_16.h \
+	      res/zoom_in_light_16.c   res/zoom_in_light_16.h \
+	      res/zoom_out_dark_16.c   res/zoom_out_dark_16.h \
+	      res/zoom_out_light_16.c  res/zoom_out_light_16.h \
+	      res/version.o
 	
 	rm -f $(filter-out %.$(BUILD_TYPE).o,$(APP_OBJS))
 	rm -f $(patsubst %.$(BUILD_TYPE).o,%.debug.o,$(filter %.$(BUILD_TYPE).o,$(APP_OBJS)))
@@ -228,8 +261,15 @@ clean:
 	grep -r "generated by genwxbind.lua" wxLua/ --exclude=genwxbind.lua | cut -d: -f1 | sort | uniq | xargs -r rm
 	rm -f $(WXLUA_BINDINGS)
 	
-	rm -f src/lua-bindings/rehex_bind.done src/lua-bindings/rehex_bind.cpp src/lua-bindings/rehex_bind.h
+	rm -f src/lua-bindings/rehex_bind.done src/lua-bindings/rehex_bind.cpp src/lua-bindings/rehex_bind.h src/lua-bindings/rehex_datatypes.lua
 	rm -f src/lua-plugin-preload.done src/lua-plugin-preload.c src/lua-plugin-preload.h
+
+	rm -f tools/config-test-atomic.cpp.aok tools/config-test-atomic.cpp.bok
+	rm -f tools/config-test-iconv.cpp.aok tools/config-test-iconv.cpp.bok
+
+	rm -rf $(DEPDIR)
+	rm -rf $(COMPILE_COMMAND_INTERMEDIATE_DIR)
+	rm -f compile_commands.json
 
 .PHONY: distclean
 distclean: clean
@@ -396,6 +436,7 @@ APP_OBJS := \
 	src/ChecksumImpl.$(BUILD_TYPE).o \
 	src/ChecksumPanel.$(BUILD_TYPE).o \
 	src/ClickText.$(BUILD_TYPE).o \
+	src/ClipboardUtils.$(BUILD_TYPE).o \
 	src/CodeCtrl.$(BUILD_TYPE).o \
 	src/ColourPickerCtrl.$(BUILD_TYPE).o \
 	src/CommentTree.$(BUILD_TYPE).o \
@@ -528,6 +569,7 @@ TEST_OBJS := \
 	src/Checksum.$(BUILD_TYPE).o \
 	src/ChecksumImpl.$(BUILD_TYPE).o \
 	src/ClickText.$(BUILD_TYPE).o \
+	src/ClipboardUtils.$(BUILD_TYPE).o \
 	src/ColourPickerCtrl.$(BUILD_TYPE).o \
 	src/CommentTree.$(BUILD_TYPE).o \
 	src/ConsoleBuffer.$(BUILD_TYPE).o \
@@ -873,8 +915,8 @@ else
 	git ls-files | xargs cp --parents -t rehex-$(VERSION)/
 	
 	# Inline any references to the HEAD commit sha/timestamp
-	sed -i -e "s|\$850f8d79d8c8b3a87be5ebbdc9abf1b214bd5e3f|850f8d79d8c8b3a87be5ebbdc9abf1b214bd5e3f|g" rehex-$(VERSION)/Makefile
-	sed -i -e "s|\$1763829681|1763829681|g" rehex-$(VERSION)/Makefile
+	sed -i -e "s|\$8bdbdc59950d92fb750d21e1ad486a9e54fc0295|8bdbdc59950d92fb750d21e1ad486a9e54fc0295|g" rehex-$(VERSION)/Makefile
+	sed -i -e "s|\$1775240751|1775240751|g" rehex-$(VERSION)/Makefile
 endif
 	
 	# Generate reproducible tarball. All files use git commit timestamp.
@@ -882,7 +924,7 @@ endif
 		LC_ALL=C sort -z | \
 		tar \
 			--format=ustar \
-			--mtime=@1763829681 \
+			--mtime=@1775240751 \
 			--owner=0 --group=0 --numeric-owner \
 			--no-recursion --null  -T - \
 			-cf - | \
