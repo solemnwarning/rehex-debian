@@ -1,5 +1,5 @@
 /* Reverse Engineer's Hex Editor
- * Copyright (C) 2024-2025 Daniel Collins <solemnwarning@solemnwarning.net>
+ * Copyright (C) 2024-2026 Daniel Collins <solemnwarning@solemnwarning.net>
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 as published by
@@ -122,7 +122,7 @@ bool REHex::SettingsDialogByteColour::Create(wxWindow *parent)
 				sdbc(sdbc) {}
 			
 		protected:
-			virtual Highlight highlight_at_off(REHex::BitOffset off) const override
+			virtual Highlight highlight_at_off(REHex::BitOffset off, REHex::BitOffset dirty_check_length) const override
 			{
 				assert(off.byte() >= 0);
 				assert(off.byte() <= 255);
@@ -166,6 +166,8 @@ bool REHex::SettingsDialogByteColour::Create(wxWindow *parent)
 	
 	std::vector<Palette::ColourIndex> pal_colours = {
 		Palette::PAL_NORMAL_TEXT_FG,
+		Palette::PAL_ALTERNATE_TEXT_FG,
+		Palette::PAL_CONTRAST_TEXT_6_FG,
 		Palette::PAL_CONTRAST_TEXT_1_FG,
 		Palette::PAL_CONTRAST_TEXT_2_FG,
 		Palette::PAL_CONTRAST_TEXT_3_FG,
@@ -432,5 +434,26 @@ void REHex::SettingsDialogByteColour::save()
 
 void REHex::SettingsDialogByteColour::reset()
 {
+	auto default_maps = AppSettings().get_byte_colour_maps();
 	
+	maps.clear();
+	
+	map_choice->Clear();
+	map_choice_keys.clear();
+	
+	for(auto i = default_maps.begin(); i != default_maps.end(); ++i)
+	{
+		maps.emplace(i->first, *(i->second));
+		
+		map_choice->Append(i->second->get_label());
+		map_choice_keys.push_back(i->first);
+		
+		/* Find the highest existing key plus one. */
+		next_map_key = std::max(next_map_key, (i->first + 1));
+	}
+	
+	map_choice->SetSelection(0);
+	map_choice_selected(0);
+	
+	delete_button->Enable(maps.size() > 1);
 }

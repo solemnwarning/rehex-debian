@@ -1,5 +1,5 @@
 /* Reverse Engineer's Hex Editor
- * Copyright (C) 2024-2025 Daniel Collins <solemnwarning@solemnwarning.net>
+ * Copyright (C) 2024-2026 Daniel Collins <solemnwarning@solemnwarning.net>
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 as published by
@@ -20,7 +20,9 @@
 
 #include <wx/checkbox.h>
 #include <wx/radiobut.h>
+#include <wx/spinctrl.h>
 
+#include "AppSettings.hpp"
 #include "SettingsDialog.hpp"
 #include "WindowCommands.hpp"
 
@@ -37,6 +39,13 @@ namespace REHex
 			wxRadioButton *su_xb;
 			
 			wxCheckBox *goto_offset_modeless;
+			
+			#ifdef REHEX_ENABLE_PRIMARY_SELECTION
+			wxCheckBox *primary_copy_enable;
+			wxSpinCtrl *primary_copy_kb;
+			#endif
+			
+			void load(const AppSettings *settings);
 			
 		public:
 			virtual bool Create(wxWindow *parent) override;
