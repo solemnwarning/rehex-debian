@@ -1,5 +1,5 @@
 /* Reverse Engineer's Hex Editor
- * Copyright (C) 2024 Daniel Collins <solemnwarning@solemnwarning.net>
+ * Copyright (C) 2024-2026 Daniel Collins <solemnwarning@solemnwarning.net>
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 as published by
@@ -98,7 +98,25 @@ void REHex::SettingsDialogKeyboard::save()
 	wxGetApp().settings->set_main_window_accelerators(main_window_commands);
 }
 
-void REHex::SettingsDialogKeyboard::reset() {}
+void REHex::SettingsDialogKeyboard::reset() {
+	main_window_commands.replace_accelerators(AppSettings().get_main_window_commands());
+	
+	int num_items = listctrl->GetItemCount();
+	for(int i = 0; i < num_items; ++i)
+	{
+		int command_id = listctrl->GetItemData(i);
+		const WindowCommand &command = main_window_commands.get_command_by_id(command_id);
+		
+		if(command.accel_keycode != WXK_NONE)
+		{
+			wxAcceleratorEntry accel(command.accel_modifiers, command.accel_keycode);
+			listctrl->SetItem(i, 1, accel.ToString());
+		}
+		else{
+			listctrl->SetItem(i, 1, "<none>");
+		}
+	}
+}
 
 void REHex::SettingsDialogKeyboard::OnListItemActivated(wxListEvent &event)
 {
@@ -177,14 +195,14 @@ void REHex::KeyCombinationDialog::update_prompt()
 		
 		if((combination.modifiers & wxACCEL_CTRL) != 0)
 		{
-#ifdef __APPLE__
+#ifdef __WXOSX__
 			prompt += "COMMAND + ";
 #else
 			prompt += "CTRL + ";
 #endif
 		}
 		
-#ifdef __APPLE__
+#ifdef __WXOSX__
 		if((combination.modifiers & wxACCEL_RAW_CTRL) != 0)
 		{
 			prompt += "CTRL + ";
@@ -225,7 +243,7 @@ void REHex::KeyCombinationDialog::OnKeyDown(wxKeyEvent &event)
 			combination.modifiers |= wxACCEL_SHIFT;
 			break;
 			
-#ifdef __APPLE__
+#ifdef __WXOSX__
 		case WXK_RAW_CONTROL:
 			combination.modifiers |= wxACCEL_RAW_CTRL;
 			break;
@@ -268,7 +286,7 @@ void REHex::KeyCombinationDialog::OnKeyUp(wxKeyEvent &event)
 			combination.modifiers &= ~wxACCEL_SHIFT;
 			break;
 			
-#ifdef __APPLE__
+#ifdef __WXOSX__
 		case WXK_RAW_CONTROL:
 			combination.modifiers &= ~wxACCEL_RAW_CTRL;
 			break;

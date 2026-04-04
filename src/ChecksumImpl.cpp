@@ -1,5 +1,5 @@
 /* Reverse Engineer's Hex Editor
- * Copyright (C) 2023 Daniel Collins <solemnwarning@solemnwarning.net>
+ * Copyright (C) 2023-2026 Daniel Collins <solemnwarning@solemnwarning.net>
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 as published by
@@ -16,6 +16,10 @@
 */
 
 #include "platform.hpp"
+
+#ifndef __STDC_FORMAT_MACROS
+#define __STDC_FORMAT_MACROS
+#endif
 
 #include <assert.h>
 #include <botan/build.h>
@@ -184,7 +188,7 @@ template<typename CRCType, uint16_t CRCWidth> std::string REHex::ChecksumGenerat
 	{
 		int pad_len = min_len - hex_len;
 		
-		memmove((hex + pad_len), hex, hex_len);
+		memmove((hex + pad_len), hex, hex_len + 1);
 		memset(hex, '0', pad_len);
 	}
 	
