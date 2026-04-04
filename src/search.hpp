@@ -23,7 +23,6 @@
 #include <set>
 #include <string>
 #include <sys/types.h>
-#include <thread>
 #include <vector>
 #include <wx/checkbox.h>
 #include <wx/choice.h>
@@ -40,6 +39,7 @@
 #include "NumericTextCtrl.hpp"
 #include "SafeWindowPointer.hpp"
 #include "SharedDocumentPointer.hpp"
+#include "ThreadPool.hpp"
 
 namespace REHex {
 	struct SearchResult
@@ -111,7 +111,7 @@ namespace REHex {
 			wxButton *m_find_next;
 			
 			std::mutex lock;
-			std::list<std::thread> threads;
+			ThreadPool::TaskHandle task;
 			std::atomic<off_t> next_window_start;
 			std::atomic<off_t> match_found_at;
 			std::atomic<bool> running;
