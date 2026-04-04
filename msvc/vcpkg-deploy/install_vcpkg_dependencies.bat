@@ -13,11 +13,11 @@ if not "%GIT_COMMIT_SHA%" == "" (
 	rem We are building a development snapshot, automatically bump the baseline version to track
 	rem the current HEAD of vcpkg, releases will remain pinned at the tag version.
 
-	pushd vcpkg || exit /b %errorlevel%
-	git pull --ff-only || exit /b %errorlevel%
-	popd || exit /b %errorlevel%
+	rem pushd vcpkg || exit /b %errorlevel%
+	rem git pull --ff-only || exit /b %errorlevel%
+	rem popd || exit /b %errorlevel%
 
-	vcpkg\vcpkg.exe x-update-baseline --x-manifest-root=vcpkg-deploy || exit /b %errorlevel%
+	rem vcpkg\vcpkg.exe x-update-baseline --x-manifest-root=vcpkg-deploy || exit /b %errorlevel%
 )
 
 copy /Y vcpkg-deploy\vcpkg.json "%2\vcpkg.json" || exit /b %errorlevel%
