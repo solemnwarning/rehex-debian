@@ -1,5 +1,5 @@
 /* Reverse Engineer's Hex Editor
- * Copyright (C) 2017-2025 Daniel Collins <solemnwarning@solemnwarning.net>
+ * Copyright (C) 2017-2026 Daniel Collins <solemnwarning@solemnwarning.net>
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2 as published by
@@ -16,6 +16,11 @@
 */
 
 #include "platform.hpp"
+
+#ifndef __STDC_FORMAT_MACROS
+#define __STDC_FORMAT_MACROS
+#endif
+
 #include <algorithm>
 #include <exception>
 #include <inttypes.h>
@@ -33,6 +38,7 @@
 #include "DataType.hpp"
 #include "DiffWindow.hpp"
 #include "CharacterEncoder.hpp"
+#include "ClipboardUtils.hpp"
 #include "CustomMessageDialog.hpp"
 #include "EditCommentDialog.hpp"
 #include "profile.hpp"
@@ -109,6 +115,7 @@ REHex::Tab::Tab(wxWindow *parent):
 	doc.auto_cleanup_bind(BACKING_FILE_MODIFIED, &REHex::Tab::OnDocumentFileModified, this);
 	
 	doc_ctrl->Bind(wxEVT_CHAR, &REHex::Tab::OnDocumentCtrlChar, this);
+	doc_ctrl->Bind(wxEVT_MIDDLE_UP, &REHex::Tab::OnDocumentCtrlMiddleUp, this);
 	
 	doc.auto_cleanup_bind(CURSOR_UPDATE,           &REHex::Tab::OnEventToForward<CursorUpdateEvent>,   this);
 	doc.auto_cleanup_bind(EV_UNDO_UPDATE,          &REHex::Tab::OnEventToForward<wxCommandEvent>,      this);
@@ -181,6 +188,7 @@ REHex::Tab::Tab(wxWindow *parent, SharedDocumentPointer &document):
 	doc.auto_cleanup_bind(BACKING_FILE_MODIFIED, &REHex::Tab::OnDocumentFileModified, this);
 	
 	doc_ctrl->Bind(wxEVT_CHAR, &REHex::Tab::OnDocumentCtrlChar, this);
+	doc_ctrl->Bind(wxEVT_MIDDLE_UP, &REHex::Tab::OnDocumentCtrlMiddleUp, this);
 	
 	doc.auto_cleanup_bind(CURSOR_UPDATE,           &REHex::Tab::OnEventToForward<CursorUpdateEvent>,   this);
 	doc.auto_cleanup_bind(EV_UNDO_UPDATE,          &REHex::Tab::OnEventToForward<wxCommandEvent>,      this);
@@ -332,6 +340,79 @@ void REHex::Tab::save_view(wxConfig *config)
 void REHex::Tab::handle_copy(bool cut)
 {
 	copy_from_doc(doc, doc_ctrl, this, cut);
+}
+
+void REHex::Tab::handle_paste(bool primary)
+{
+	ClipboardGuard cg(primary);
+	if(cg)
+	{
+		/* If there is a selection and it is entirely contained within a Region, give that
+		 * region the chance to handle the paste event.
+		*/
+		
+		if(doc_ctrl->has_selection())
+		{
+			BitOffset selection_first, selection_last;
+			std::tie(selection_first, selection_last) = doc_ctrl->get_selection_raw();
+			
+			REHex::DocumentCtrl::GenericDataRegion *selection_region = doc_ctrl->data_region_by_offset(selection_first);
+			assert(selection_region != NULL);
+			
+			assert(selection_region->d_offset <= selection_last);
+			assert((selection_region->d_offset + selection_region->d_length) >= selection_first);
+			
+			if((selection_region->d_offset + selection_region->d_length) > selection_last)
+			{
+				if(selection_region->OnPaste(doc_ctrl))
+				{
+					/* Region consumed the paste event. */
+					return;
+				}
+			}
+		}
+		
+		/* Give the region the cursor is in a chance to handle the paste event. */
+		
+		BitOffset cursor_pos = doc_ctrl->get_cursor_position();
+		
+		REHex::DocumentCtrl::GenericDataRegion *cursor_region = doc_ctrl->data_region_by_offset(cursor_pos);
+		assert(cursor_region != NULL);
+		
+		if(cursor_region->OnPaste(doc_ctrl))
+		{
+			/* Region consumed the paste event. */
+			return;
+		}
+		
+		/* No region consumed the event. Fallback to default handling. */
+		
+		if(wxTheClipboard->IsSupported(CommentsDataObject::format))
+		{
+			CommentsDataObject data;
+			wxTheClipboard->GetData(data);
+			
+			auto clipboard_comments = data.get_comments();
+			
+			doc->handle_paste(this, clipboard_comments);
+		}
+		else if(wxTheClipboard->IsSupported(wxDF_TEXT))
+		{
+			wxTextDataObject data;
+			wxTheClipboard->GetData(data);
+			
+			try {
+				wxString clipboard_text = data.GetText();
+				const wxScopedCharBuffer clipboard_utf8 = clipboard_text.utf8_str();
+				
+				paste_text(std::string(clipboard_utf8.data(), clipboard_utf8.length()));
+			}
+			catch(const std::exception &e)
+			{
+				wxMessageBox(e.what(), "Error", (wxOK | wxICON_ERROR), this);
+			}
+		}
+	}
 }
 
 void REHex::Tab::paste_text(const std::string &text)
@@ -682,7 +763,7 @@ void REHex::Tab::OnDocumentCtrlChar(wxKeyEvent &event)
 		
 		return;
 	}
-	else if(doc_ctrl->ascii_view_active() && (modifiers == wxMOD_NONE || modifiers == wxMOD_SHIFT) && ukey != WXK_NONE && key != '\t')
+	else if(doc_ctrl->ascii_view_active() && (modifiers == wxMOD_NONE || modifiers == wxMOD_SHIFT) && ukey != WXK_NONE && key != '\t' && key != WXK_BACK)
 	{
 		wxCharBuffer utf8_buf = wxString(wxUniChar(ukey)).utf8_str();
 		std::string utf8_key(utf8_buf.data(), utf8_buf.length());
@@ -732,7 +813,7 @@ void REHex::Tab::OnDocumentCtrlChar(wxKeyEvent &event)
 			}
 			else if(cursor_pos.byte_aligned()
 				&& cursor_pos_within_region.byte_aligned()
-				&& (cursor_pos.byte() + 1) < doc->buffer_length())
+				&& (cursor_pos.byte() + 1) < (doc->buffer_length() + (off_t)(doc_ctrl->get_insert_mode())))
 			{
 				doc->erase_data(cursor_pos.byte(), 1, cursor_pos, Document::CSTATE_GOTO, "delete");
 			}
@@ -771,7 +852,7 @@ void REHex::Tab::OnDocumentCtrlChar(wxKeyEvent &event)
 				*/
 				doc->erase_data(cursor_pos.byte(), 1, (cursor_pos - BitOffset(1, 4)), Document::CSTATE_GOTO, "delete");
 			}
-			else if(cursor_pos.bit() == 0 && cursor_pos_within_region.bit() == 0)
+			else if(cursor_pos.byte() > 0 && cursor_pos.bit() == 0 && cursor_pos_within_region.bit() == 0)
 			{
 				doc->erase_data((cursor_pos.byte() - 1), 1, (cursor_pos - BitOffset(1, 0)), Document::CSTATE_GOTO, "delete");
 			}
@@ -794,6 +875,13 @@ void REHex::Tab::OnDocumentCtrlChar(wxKeyEvent &event)
 	}
 	
 	event.Skip();
+}
+
+void REHex::Tab::OnDocumentCtrlMiddleUp(wxMouseEvent &event)
+{
+	#ifdef REHEX_ENABLE_PRIMARY_SELECTION
+	handle_paste(true);
+	#endif
 }
 
 void REHex::Tab::OnCommentLeftClick(BitRangeEvent &event)
@@ -1071,7 +1159,7 @@ void REHex::Tab::OnDataRightClick(wxCommandEvent &event)
 					std::vector< std::unique_ptr<SettingsDialogPanel> > panels;
 					panels.push_back(std::unique_ptr<SettingsDialogPanel>(new SettingsDialogDocHighlights(doc)));
 					
-					doc_properties.reset(new SettingsDialog(this, doc->get_title() + " - File properties", std::move(panels)));
+					doc_properties.reset(new SettingsDialog(this, doc->get_title() + " - File properties", std::move(panels), false));
 					doc_properties->Show();
 				}
 				else{
@@ -1414,7 +1502,7 @@ void REHex::Tab::file_modified_dialog()
 			(wxString("The file '") + doc->get_title() + "' has been modified externally.\n"
 				+ "Reload this file?"),
 			"File modified",
-			(wxICON_EXCLAMATION | wxCENTER));
+			(wxDEFAULT_DIALOG_STYLE | wxICON_EXCLAMATION));
 		
 		confirm.AddButton(ID_RELOAD, "Yes");
 		confirm.AddButton(ID_AUTO_RELOAD, "Yes (always)");
@@ -1422,6 +1510,8 @@ void REHex::Tab::file_modified_dialog()
 		
 		confirm.SetEscapeId(ID_IGNORE);
 		confirm.SetAffirmativeId(ID_RELOAD);
+
+		confirm.Centre();
 		
 		int response = confirm.ShowModal();
 		if(response == ID_IGNORE)
@@ -1578,6 +1668,11 @@ void REHex::Tab::repopulate_regions()
 		PROFILE_INNER_BLOCK("replace regions");
 		doc_ctrl->replace_all_regions(regions);
 	}
+
+	/* Copy Document cursor state to DocumentCtrl in case a previous update was rejected/clamped
+	 * due to a pending region update.
+	*/
+	doc_ctrl->set_cursor_position(doc->get_cursor_position(), doc->get_cursor_state());
 }
 
 void REHex::Tab::repopulate_regions_freeze()
