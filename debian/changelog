@@ -1,10 +1,4 @@
-rehex (0.64.0-0~ubuntu2510+1) questing; urgency=low
-
-  * Fix bad merge.
-
- -- Daniel Collins <solemnwarning@solemnwarning.net>  Sat, 04 Apr 2026 11:01:54 +0100
-
-rehex (0.64.0-0~ubuntu2510) questing; urgency=low
+rehex (0.64.0-0~ubuntu2604) resolute; urgency=low
 
   * Update Lua plugin integration to support Lua 5.5.
 
@@ -38,7 +32,7 @@ rehex (0.64.0-0~ubuntu2510) questing; urgency=low
 
   * Add reset to defaults button to preferences dialog.
 
- -- Daniel Collins <solemnwarning@solemnwarning.net>  Sat, 04 Apr 2026 10:14:07 +0100
+ -- Daniel Collins <solemnwarning@solemnwarning.net>  Sat, 25 Apr 2026 14:12:15 +0100
 
 rehex (0.63.4-0~ubuntu2510) questing; urgency=low
 
